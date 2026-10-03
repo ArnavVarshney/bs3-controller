@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import functools
 import json
+import logging
 import os
 import sys
 import threading
@@ -260,6 +261,8 @@ def _ensure_lhm(path: str | None) -> None:
 def main(argv=None) -> int:
     _setup_headless_log()
     from . import __version__
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s bs3: %(message)s",
+                        datefmt="%Y-%m-%d %H:%M:%S", stream=sys.stderr, force=True)
     ap = argparse.ArgumentParser(prog="bs3-web", description="Local BS3 dashboard (localhost only)")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--port", type=int, default=8765)
@@ -278,7 +281,7 @@ def main(argv=None) -> int:
     mgr = DeviceManager(transport=a.transport, address=a.address)
     Handler.mgr = mgr
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
-    print(f"bs3-web on http://127.0.0.1:{a.port}  (Ctrl-C stops, localhost only — no auth)")
+    print(f"bs3-web {__version__} on http://127.0.0.1:{a.port}  (Ctrl-C stops, localhost only — no auth)")
     try:
         srv.serve_forever()
     except KeyboardInterrupt:

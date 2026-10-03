@@ -25,13 +25,17 @@ from . import protocol as P
 from . import rgb as R
 from . import sensors
 
+import logging
+
+log = logging.getLogger("bs3")
+
 CONFIG_PATH = os.path.expanduser("~/.config/bs3-controller/config.json")
 HISTORY_N = 120
 
 
 class DeviceManager:
     def __init__(self, transport: str = "hid", address: str = "auto"):
-        self.lock = threading.Lock()
+        self.lock = threading.RLock()
         self.transport = transport
         self.address = address
         self.dev: H.HidCooler | None = None
@@ -57,7 +61,9 @@ class DeviceManager:
         self.history: list[dict] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self._last_probe = 0.0  # last auto-retry while unconnected
+        self._last_probe = time.monotonic()  # _conn_thread owns the first attempt; _loop joins in after 10s
+        self._last_logged_error: str | None = None  # dedup: don't spam the log while the pad stays away
+        self._logged_up = False  # log each fresh connect once
         self._load_config()
         # First connect happens off-thread: a BLE link can take tens of
         # seconds (scan + WinRT connect), and the HTTP server must answer
@@ -88,6 +94,26 @@ class DeviceManager:
             pass
 
     # -- connection --
+    def _note_error(self, msg: str) -> None:
+        """Record a no-link error; log it only when it changes (a missing
+        pad would otherwise spam the log every retry)."""
+        with self.lock:
+            self.connected = False
+            self.error = msg
+            self._logged_up = False
+            if msg != self._last_logged_error:
+                self._last_logged_error = msg
+                log.warning("cooler: %s", msg)
+
+    def _note_connected(self, summary: str) -> None:
+        """Record a fresh link; log it once per connect."""
+        with self.lock:
+            self.error = None
+            if not self._logged_up:
+                self._logged_up = True
+                self._last_logged_error = None
+                log.info("cooler connected: %s", summary)
+
     def _run_ble(self, coro, timeout: float = 10.0):
         """Drive one bleak coroutine from sync code (HTTP threads + poll loop)."""
         assert self._aloop is not None
@@ -99,9 +125,7 @@ class DeviceManager:
             return
         found = H.find_coolers()
         if not found:
-            with self.lock:
-                self.connected = False
-                self.error = "No cooler found — pair it over Bluetooth or plug in USB, and make sure it's powered on."
+            self._note_error("No cooler found — pair it over Bluetooth or plug in USB, and make sure it's powered on.")
             return
         pick = found[0]
         try:
@@ -127,18 +151,15 @@ class DeviceManager:
                 self.connected = True
                 self.error = None
                 self.curve._last_sent = None  # fresh link: realtime never survives one
+                self._note_connected(f"{pick.get('model', '?')} via {pick['node']} (fw {fw})")
         except (OSError, TimeoutError) as e:
-            with self.lock:
-                self.connected = False
-                self.error = f"{pick['node']}: {e}"
+            self._note_error(f"{pick['node']}: {e}")
 
     def _try_connect_ble(self):
         try:
             from . import bleak_backend as B
         except ImportError:
-            with self.lock:
-                self.connected = False
-                self.error = "The BLE transport needs the ble extra: pip install -e .[ble]"
+            self._note_error("The BLE transport needs the ble extra: pip install -e .[ble]")
             return
         try:
             addr = self.address
@@ -176,12 +197,11 @@ class DeviceManager:
                 self.connected = True
                 self.error = None
                 self.curve._last_sent = None  # fresh link: realtime never survives one
+                self._note_connected(f"{ctl.model or '?'} fw {fw} via BLE {addr}")
         except asyncio.CancelledError:
             return  # shutting down mid-connect
         except Exception as e:
-            with self.lock:
-                self.connected = False
-                self.error = f"Bluetooth error ({self.address}): {e}"
+            self._note_error(f"Bluetooth error ({self.address}): {e}")
 
     def reconnect(self):
         if self.transport == "ble":
@@ -242,15 +262,13 @@ class DeviceManager:
                                                self.last_status["target_rpm"])
                 except (TimeoutError, OSError, RuntimeError, ValueError):
                     # ValueError: fd closed under us by reconnect()/stop()
-                    with self.lock:
-                        self.error = "Connection lost — retrying…"
+                    self._note_error("Connection lost — retrying…")
                     time.sleep(2)
                     self._try_connect()
                     continue
                 except Exception:
                     # bleak radio errors (BleakError et al.) are plain Exceptions
-                    with self.lock:
-                        self.error = "Connection lost — retrying…"
+                    self._note_error("Connection lost — retrying…")
                     time.sleep(2)
                     self._try_connect()
                     continue

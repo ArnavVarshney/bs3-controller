@@ -38,6 +38,19 @@ let fxBuilt = false;
 let gearBuilt = false;
 let polling = false;
 
+/* Render-on-change: the poll ticks every second, but DOM work only happens
+ * when something actually moved — otherwise an open dashboard burns CPU
+ * redrawing identical gauges, SVGs and canvases forever. */
+const _seen = {};
+function setText(id, v) {
+  v = String(v);
+  if (_seen[id] === v) return;
+  _seen[id] = v;
+  $(id).textContent = v;
+}
+let drawnCurveSig = null;
+let drawnHistSig = null;
+
 function showErr(msg) {
   const el = $("err");
   if (!msg) { el.hidden = true; el.textContent = ""; return; }
@@ -152,28 +165,30 @@ async function useBle() {
 /* ---------- status rendering (same as bs3-web) ---------- */
 function render(s) {
   SNAP = s;
+  if (document.hidden) return; // data cached in SNAP; DOM catches up when visible
   const st = s.status;
   $("dot").className = "dot " + (!st ? "bad" : "ok");
   if (!st) {
-    $("model").textContent = "No cooler";
+    setText("model", "No cooler");
     return;
   }
-  $("model").textContent = (s.model || "?") + " · fw " + (s.fw || "?");
+  setText("model", (s.model || "?") + " · fw " + (s.fw || "?"));
 
   const cur = st.current_rpm || 0;
   const M = unitMax();
-  $("rpm").max = M;
-  $("gaugeArc").style.strokeDashoffset = String(GAUGE_LEN * (1 - Math.min(cur, M) / M));
-  $("rpmText").textContent = cur;
-  $("tRpm").textContent = st.target_rpm + " rpm";
-  $("cpu").textContent = s.cpu_temp == null ? "–" : s.cpu_temp.toFixed(1) + "°C";
-  $("mode").textContent = st.mode + (st.realtime ? " (override)" : "");
-  $("supply").textContent = st.supply_name + " (" + st.rpm_ceiling + " cap)";
-  $("chipGear").textContent = "gear " + st.gear + " → " + st.effective_gear;
-  $("chipStrip").textContent = "strip " + (st.strip_on ? "on" : "off") + " · gear-led " + (st.gear_led_on ? "on" : "off");
-  $("chipFw").textContent = "standby " + st.standby + " · autostart " + (st.autostart ? "on" : "off");
+  if (String($("rpm").max) !== String(M)) $("rpm").max = M;
+  const off = String(GAUGE_LEN * (1 - Math.min(cur, M) / M));
+  if (_seen.gaugeArc !== off) { _seen.gaugeArc = off; $("gaugeArc").style.strokeDashoffset = off; }
+  setText("rpmText", cur);
+  setText("tRpm", st.target_rpm + " rpm");
+  setText("cpu", s.cpu_temp == null ? "–" : s.cpu_temp.toFixed(1) + "°C");
+  setText("mode", st.mode + (st.realtime ? " (override)" : ""));
+  setText("supply", st.supply_name + " (" + st.rpm_ceiling + " cap)");
+  setText("chipGear", "gear " + st.gear + " → " + st.effective_gear);
+  setText("chipStrip", "strip " + (st.strip_on ? "on" : "off") + " · gear-led " + (st.gear_led_on ? "on" : "off"));
+  setText("chipFw", "standby " + st.standby + " · autostart " + (st.autostart ? "on" : "off"));
   const c0 = (s.coolers && s.coolers[0]) || null;
-  $("trans").textContent = c0 ? (c0.model + " " + c0.node + " " + c0.transport) : "";
+  setText("trans", c0 ? (c0.model + " " + c0.node + " " + c0.transport) : "");
   $("fanIcon").classList.toggle("spin", cur > 0);
   $("curveNote").hidden = TRANSPORT === "Backend";
 
@@ -181,7 +196,7 @@ function render(s) {
   document.querySelectorAll("#gearBtns button").forEach((b) => {
     b.classList.toggle("on", b.dataset.gear === st.effective_gear && !st.realtime);
   });
-  if (document.activeElement !== $("rpm")) { $("rpm").value = st.target_rpm; $("rpmVal").textContent = st.target_rpm; }
+  if (document.activeElement !== $("rpm")) { $("rpm").value = st.target_rpm; setText("rpmVal", st.target_rpm); }
   if (!$("curveOn").matches(":focus")) $("curveOn").checked = !!s.auto_curve;
   // Browser-direct has no CPU-temp automation: keep the toggle visible but inert.
   $("curveOn").disabled = TRANSPORT !== "Backend";
@@ -220,8 +235,15 @@ function render(s) {
     const srv = JSON.stringify((s.curve || []).map((p) => [Number(p[0]), Number(p[1])]));
     if (srv !== JSON.stringify(localCurve)) localCurve = JSON.parse(srv);
   }
-  if (dragging < 0) drawCurve();
-  drawHist(s.history || []);
+  if (dragging < 0) {
+    // Rebuild the curve SVG only when the points moved (a full rebuild
+    // every poll is the idle-CPU hog); drags paint live via pointermove.
+    const sig = JSON.stringify(localCurve);
+    if (sig !== drawnCurveSig) { drawCurve(); drawnCurveSig = sig; }
+  }
+  const hist = s.history || [];
+  const hsig = hist.length + ":" + (hist.length ? hist[hist.length - 1].t : 0);
+  if (hsig !== drawnHistSig) { drawHist(hist); drawnHistSig = hsig; }
 }
 
 function buildGearBtns(names) {
