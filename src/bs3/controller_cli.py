@@ -42,6 +42,7 @@ def _open_hid(node: str | None) -> H.HidCooler:
         pick = coolers[0]  # cable preferred by find_coolers sort
     dev = H.HidCooler(pick["node"], pick["transport"])
     dev.open()
+    dev.model = pick["model"]  # for model-specific clamps (cf. dev._supply below)
     print(f"# {pick['model']} on {pick['node']} via {pick['transport']}", file=sys.stderr)
     return dev
 
@@ -91,8 +92,8 @@ def cmd_status(a) -> int:
 async def _gatt_status(a) -> int:
     from .gatt_backend import GattCooler
     ctl = GattCooler(a.address)
-    await ctl.connect()
     try:
+        await ctl.connect()
         fw = (await ctl.transact(P.CMD_FW_VERSION))[4:-1]
         print(f"fw: {'.'.join(str(b) for b in fw)}")
         s = await ctl.status()
@@ -104,6 +105,9 @@ async def _gatt_status(a) -> int:
 
 def cmd_gear(a) -> int:
     with _open_hid(a.node) as dev:
+        allowed = P.model_gears(getattr(dev, "model", None))
+        if a.gear not in allowed:
+            raise SystemExit(f"{getattr(dev, 'model', None) or 'cooler'} has {len(allowed)} gears: {', '.join(allowed)}")
         dev.select_gear(GEARS[a.gear])
         time.sleep(0.6)
         print(f"gear: {a.gear}")
@@ -116,9 +120,9 @@ def cmd_rpm(a) -> int:
             supply = dev.supply_level()
         except TimeoutError:
             supply = 3
-        sent = dev.set_realtime_rpm(a.rpm, supply)
+        sent = dev.set_realtime_rpm(a.rpm, supply, getattr(dev, "model", None))
         if sent != a.rpm:
-            print(f"target {a.rpm} clamped to {sent} (supply {supply}, stall-band/supply rules)")
+            print(f"target {a.rpm} clamped to {sent} (supply {supply}, stall-band/supply/model rules)")
         else:
             print(f"target {sent} rpm (realtime override; gear LEDs blink)")
     return 0
@@ -156,6 +160,7 @@ def cmd_set_gear_rpm(a) -> int:
 def cmd_rgb(a) -> int:
     on = a.state == "on"
     with _open_hid(a.node) as dev:
+        _require_strip(dev)
         dev.transact(P.CMD_STRIP_POWER, bytes((0x01 if on else 0x00,)))
         print(f"strip {'on' if on else 'off'}")
     return 0
@@ -165,6 +170,7 @@ def cmd_effect(a) -> int:
     if a.effect not in R.EFFECT_NAMES:
         raise SystemExit(f"effect 0..5: {R.EFFECT_NAMES}")
     with _open_hid(a.node) as dev:
+        _require_strip(dev)
         dev.transact(P.CMD_STRIP_POWER, b"\x01")
         dev.transact(P.CMD_SELECT_EFFECT, bytes((a.effect,)))
         if a.effect == 0:
@@ -176,8 +182,13 @@ def cmd_effect(a) -> int:
 
 def cmd_rgb_upload(a) -> int:
     r, g, b = a.color
+    if any(not 0 <= c <= 255 for c in (r, g, b)):
+        raise SystemExit("color 0..255")
+    if not 0 <= a.brightness <= 100:
+        raise SystemExit("brightness 0..100")
     header, frames = R.static_color_frames((r, g, b), a.brightness)
     with _open_hid(a.node) as dev:
+        _require_strip(dev)
         dev.transact(P.CMD_STRIP_POWER, b"\x01")
         for cmd, payload in R.upload_plan(header, frames):
             dev.transact(cmd, payload)
@@ -199,7 +210,6 @@ def cmd_monitor(a) -> int:
     """CPU-temp curve loop. Re-applies after reconnect (realtime never survives one)."""
     cv = C.Curve()
     print("# temp -> rpm curve active (Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
-    last_node = None
     dev = None
     try:
         while True:
@@ -212,7 +222,6 @@ def cmd_monitor(a) -> int:
             if dev is None:
                 try:
                     dev = _open_hid(a.node)
-                    last_node = dev.node
                 except SystemExit as e:
                     print(f"{e} -- retry in 5s", file=sys.stderr)
                     time.sleep(5)
@@ -224,10 +233,10 @@ def cmd_monitor(a) -> int:
                         dev._supply = dev.supply_level()
                     except TimeoutError:
                         dev._supply = 3
-                want, changed = cv.update(t, dev._supply)
+                want, changed = cv.update(t, dev._supply, getattr(dev, "model", None))
                 if changed:
                     try:
-                        dev.set_realtime_rpm(want, dev._supply)
+                        dev.set_realtime_rpm(want, dev._supply, getattr(dev, "model", None))
                     except (TimeoutError, OSError):
                         print("link lost, will reconnect", file=sys.stderr)
                         dev.close()
@@ -285,8 +294,7 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def main(argv=None) -> int:
-    a = build_parser().parse_args(argv)
+def _dispatch(a) -> int:
     if a.cmd == "list":
         return cmd_list(a)
     if a.cmd == "status":
@@ -316,6 +324,16 @@ def main(argv=None) -> int:
     if a.cmd == "monitor":
         return cmd_monitor(a)
     raise AssertionError(a.cmd)
+
+
+def main(argv=None) -> int:
+    a = build_parser().parse_args(argv)
+    try:
+        return _dispatch(a)
+    except (OSError, TimeoutError, RuntimeError) as e:
+        # unplug / link loss / firmware refusal mid-command: clean message, not a traceback
+        print(f"device error: {e}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

@@ -1,4 +1,3 @@
-import struct
 from bs3 import protocol as P
 
 
@@ -59,3 +58,30 @@ def test_clamp_rules():
     assert P.clamp_rpm(4000, supply=1) == 2700
     assert P.clamp_rpm(4000, supply=2) == 3300
     assert P.clamp_rpm(4000, supply=3) == 4000
+
+
+def test_model_ceiling():
+    # measured: base BS3 saturates ~3300-3400 with 4000 commanded at supply 3
+    assert P.model_ceiling("BS3") == 3400
+    assert P.model_ceiling("BS3 Pro") == P.MAX_RPM  # unverified, keeps rating
+    assert P.model_ceiling(None) == P.MAX_RPM
+    assert P.model_ceiling("???") == P.MAX_RPM
+    assert P.clamp_rpm(4000, supply=3, model="BS3") == 3400
+    assert P.clamp_rpm(2000, supply=3, model="BS3") == 2000
+    assert P.clamp_rpm(0, supply=3, model="BS3") == 0
+    assert P.clamp_rpm(300, supply=3, model="BS3") == 500  # stall band first
+    assert P.clamp_rpm(4000) == 4000  # model omitted: old behavior
+
+
+def test_model_has_strip():
+    assert P.MODEL_HAS_STRIP.get("BS3", True) is False  # gear LEDs only
+    assert P.MODEL_HAS_STRIP.get("BS3 Pro", True) is True
+    assert P.MODEL_HAS_STRIP.get("Demo BS3", True) is True
+
+
+def test_model_gears():
+    # measured: base BS3 ACKs 0x08 gear 04 but 0xEF keeps reporting gear 3
+    assert P.model_gears("BS3") == ["quiet", "standard", "strong"]
+    assert P.model_gears("BS3 Pro") == P.GEAR_NAMES
+    assert P.model_gears("Demo BS3") == P.GEAR_NAMES
+    assert P.model_gears(None) == P.GEAR_NAMES

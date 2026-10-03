@@ -48,8 +48,8 @@ class DemoCooler:
         now = time.monotonic()
         dt = now - self.last
         self.last = now
-        goal = self.target if (self.realtime or True) else self.gears[self.gear_idx]
         step = 600 * dt  # ~600 rpm/s in demo (snappier than hw ~60/s)
+        goal = self.target  # actions always steer target (gear selects set it too)
         if self.current < goal:
             self.current = min(goal, self.current + step)
         elif self.current > goal:
@@ -78,7 +78,7 @@ class DemoCooler:
 
 
 class DeviceManager:
-    def __init__(self):
+    def __init__(self, demo: bool = False):
         self.lock = threading.Lock()
         self.dev: H.HidCooler | None = None
         self.info: dict | None = None
@@ -98,7 +98,12 @@ class DeviceManager:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._load_config()
-        self._try_connect()
+        if demo:
+            with self.lock:
+                self.use_demo = True
+                self.error = "demo mode: running without hardware"
+        else:
+            self._try_connect()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -110,7 +115,7 @@ class DeviceManager:
             self.curve.points = [(float(t), int(r)) for t, r in cfg.get("curve", C.DEFAULT_CURVE)]
             self.light.update(cfg.get("light", {}))
             self.auto_curve = bool(cfg.get("auto_curve", False))
-        except (OSError, ValueError, KeyError):
+        except (OSError, ValueError, KeyError, TypeError):
             pass
 
     def save_config(self):
@@ -168,6 +173,11 @@ class DeviceManager:
         self.curve._last_sent = None
         self._try_connect()
 
+    def model_name(self) -> str:
+        if self.use_demo:
+            return "Demo BS3"
+        return (self.info or {}).get("model", "?")
+
     # -- poll loop --
     def _loop(self):
         while not self._stop.is_set():
@@ -180,7 +190,7 @@ class DeviceManager:
             if self.use_demo:
                 with self.lock:
                     if self.auto_curve and t is not None:
-                        want, changed = self.curve.update(t, self.demo.supply)
+                        want, changed = self.curve.update(t, self.demo.supply, "Demo BS3")
                         if changed:
                             self.demo.target = want
                             self.demo.realtime = want != self.demo.gears[self.demo.gear_idx] or want == 0
@@ -196,17 +206,18 @@ class DeviceManager:
                     with self.lock:
                         st_obj = self.dev.read_status_push(timeout=2.5)
                     if t is not None and self.auto_curve:
-                        want, changed = self.curve.update(t, self.supply)
+                        want, changed = self.curve.update(t, self.supply, self.model_name())
                         if changed:
                             with self.lock:
                                 assert self.dev is not None
-                                self.dev.set_realtime_rpm(want, self.supply)
+                                self.dev.set_realtime_rpm(want, self.supply, self.model_name())
                     with self.lock:
                         self.last_status = _status_to_dict(st_obj)
                         self.error = None
                         self._push_history(t, self.last_status["current_rpm"],
                                            self.last_status["target_rpm"])
-                except (TimeoutError, OSError, RuntimeError):
+                except (TimeoutError, OSError, RuntimeError, ValueError):
+                    # ValueError: fd closed under us by reconnect()/stop()
                     with self.lock:
                         self.error = "link lost — retrying"
                     time.sleep(2)
@@ -224,7 +235,7 @@ class DeviceManager:
         return None if self.use_demo else self.dev
 
     def set_rpm(self, rpm: int) -> dict:
-        rpm = P.clamp_rpm(rpm, self.supply if not self.use_demo else 3)
+        rpm = P.clamp_rpm(rpm, self.supply if not self.use_demo else 3, self.model_name())
         with self.lock:
             self.auto_curve = False
             self.curve._last_sent = None
@@ -235,12 +246,15 @@ class DeviceManager:
                 dev = self._hw()
                 if not dev:
                     raise RuntimeError("no cooler connected")
-                dev.set_realtime_rpm(rpm, self.supply)
+                dev.set_realtime_rpm(rpm, self.supply, self.model_name())
             self.save_config()
             return {"target_rpm": rpm}
 
     def select_gear(self, name: str) -> dict:
-        idx = P.GEAR_NAMES.index(name)
+        names = P.model_gears(self.model_name())
+        if name not in names:
+            raise ValueError(f"{self.model_name()} has {len(names)} gears: {names}")
+        idx = names.index(name)
         with self.lock:
             self.auto_curve = False
             self.curve._last_sent = None
@@ -313,6 +327,10 @@ class DeviceManager:
             return {"effect": effect}
 
     def upload_color(self, r: int, g: int, b: int, brightness: int) -> dict:
+        if not all(isinstance(v, int) and 0 <= v <= 255 for v in (r, g, b)):
+            raise ValueError("color 0..255")
+        if not isinstance(brightness, int) or not 0 <= brightness <= 100:
+            raise ValueError("brightness 0..100")
         header, frames = R.static_color_frames((r, g, b), brightness)
         with self.lock:
             self.light.update({"color": [r, g, b], "brightness": brightness,
@@ -345,6 +363,8 @@ class DeviceManager:
         pts = sorted([(float(t), int(r)) for t, r in points])
         if len(pts) < 2 or len(pts) > 8:
             raise ValueError("curve needs 2..8 points")
+        if any(b - a < 0.05 for a, b in zip([t for t, _ in pts], [t for t, _ in pts][1:])):
+            raise ValueError("curve temps must differ (interpolation divides by temp gaps)")
         with self.lock:
             self.curve.points = pts
             self.curve._last_sent = None
@@ -353,6 +373,7 @@ class DeviceManager:
             return {"curve": pts, "auto_curve": enabled}
 
     def set_gear_table(self, table: list[int]) -> dict:
+        # 4 slots even on 3-gear models: the flash table physically holds 4
         if len(table) != 4 or not all(500 <= r <= 4000 for r in table):
             raise ValueError("4 gears, each 500..4000")
         with self.lock:
@@ -371,16 +392,20 @@ class DeviceManager:
     def snapshot(self) -> dict:
         with self.lock:
             coolers = [] if self.use_demo else ([self.info] if self.info else [])
+            model = self.model_name()
             return {
                 "demo": self.use_demo,
                 "error": self.error,
                 "coolers": coolers,
-                "model": "Demo BS3" if self.use_demo else (self.info or {}).get("model", "?"),
+                "model": model,
+                "has_strip": P.MODEL_HAS_STRIP.get(model, True),
+                "max_rpm": P.model_ceiling(model),
                 "fw": "0.0.2.4-demo" if self.use_demo else self.fw,
                 "status": self.last_status,
                 "cpu_temp": self.cpu_temp,
                 "supply": self.supply if not self.use_demo else 3,
                 "gears": self.gears,
+                "gear_names": P.model_gears(model),
                 "light": dict(self.light),
                 "curve": [list(p) for p in self.curve.points],
                 "auto_curve": self.auto_curve,

@@ -6,7 +6,9 @@ Stdlib only (no new deps). Serves the UI + JSON API on localhost:
     PYTHONPATH=src python3 -m bs3.webapp [--port 8765] [--demo]
 
 API:
-  GET  /api/status            full snapshot (status, cpu_temp, gears, light, curve, history)
+  GET  /api/status            full snapshot (status, cpu_temp, gears, gear_names,
+                                   light, curve, history, model, max_rpm unit ceiling,
+                                   has_strip lighting capability)
   POST /api/rpm               {rpm}
   POST /api/gear              {gear: quiet|standard|strong|overclock}
   POST /api/auto              release to gear mode
@@ -45,6 +47,44 @@ def _send_json(h: BaseHTTPRequestHandler, obj, code: int = 200):
     h.send_header("Content-Length", str(len(body)))
     h.end_headers()
     h.wfile.write(body)
+
+
+def _req_int(body: dict, key: str, default=None) -> int:
+    """Strict integer field: rejects missing/bool/str/None (all -> 400)."""
+    if key not in body:
+        if default is None:
+            raise ValueError(f"{key} is required")
+        return default
+    v = body[key]
+    if isinstance(v, bool) or not isinstance(v, int):
+        raise ValueError(f"{key} must be an integer")
+    return v
+
+
+def _req_bool(body: dict, key: str, default=None) -> bool:
+    """Strict boolean field: JSON true/false only ("false" is not false)."""
+    if key not in body:
+        if default is None:
+            raise ValueError(f"{key} is required")
+        return default
+    v = body[key]
+    if not isinstance(v, bool):
+        raise ValueError(f"{key} must be true or false")
+    return v
+
+
+def _req_str(body: dict, key: str) -> str:
+    v = body.get(key)
+    if not isinstance(v, str):
+        raise ValueError(f"{key} must be a string")
+    return v
+
+
+def _req_list(body: dict, key: str) -> list:
+    v = body.get(key)
+    if not isinstance(v, list):
+        raise ValueError(f"{key} must be a list")
+    return v
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -96,26 +136,29 @@ class Handler(BaseHTTPRequestHandler):
         m = self.mgr
         try:
             if path == "/api/rpm":
-                out = m.set_rpm(int(body["rpm"]))
+                out = m.set_rpm(_req_int(body, "rpm"))
             elif path == "/api/gear":
-                out = m.select_gear(str(body["gear"]))
+                out = m.select_gear(_req_str(body, "gear"))
             elif path == "/api/auto":
                 out = m.release()
             elif path == "/api/strip":
-                out = m.set_strip(bool(body["on"]))
+                out = m.set_strip(_req_bool(body, "on"))
             elif path == "/api/gear-led":
-                out = m.set_gear_led(bool(body["on"]))
+                out = m.set_gear_led(_req_bool(body, "on"))
             elif path == "/api/effect":
-                out = m.set_effect(int(body["effect"]))
+                out = m.set_effect(_req_int(body, "effect"))
             elif path == "/api/rgb-upload":
-                out = m.upload_color(int(body["r"]), int(body["g"]), int(body["b"]),
-                                     int(body.get("brightness", 70)))
+                out = m.upload_color(_req_int(body, "r"), _req_int(body, "g"), _req_int(body, "b"),
+                                     _req_int(body, "brightness", 70))
             elif path == "/api/standby":
-                out = m.set_standby(str(body["mode"]))
+                out = m.set_standby(_req_str(body, "mode"))
             elif path == "/api/curve":
-                out = m.set_curve(list(body["points"]), bool(body.get("enabled", True)))
+                out = m.set_curve(_req_list(body, "points"), _req_bool(body, "enabled", True))
             elif path == "/api/gear-table":
-                out = m.set_gear_table([int(x) for x in body["gears"]])
+                gears = _req_list(body, "gears")
+                if len(gears) != 4 or any(isinstance(x, bool) or not isinstance(x, int) for x in gears):
+                    raise ValueError("gears must be 4 integers")
+                out = m.set_gear_table(list(gears))
             elif path == "/api/reconnect":
                 m.reconnect()
                 out = {"ok": True}
@@ -133,12 +176,9 @@ class Handler(BaseHTTPRequestHandler):
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="bs3-web", description="Local BS3 dashboard (localhost only)")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--demo", action="store_true", help="force demo mode (no hardware)")
+    ap.add_argument("--demo", action="store_true", help="demo mode: explore the UI without hardware (no hidraw access)")
     a = ap.parse_args(argv)
-    mgr = DeviceManager()
-    if a.demo:
-        mgr.use_demo = True
-        mgr.error = "demo forced with --demo"
+    mgr = DeviceManager(demo=a.demo)
     Handler.mgr = mgr
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     print(f"bs3-web on http://127.0.0.1:{a.port}  (Ctrl-C stops, localhost only — no auth)")

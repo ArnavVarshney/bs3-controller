@@ -96,12 +96,35 @@ SUPPLY_NAMES = {0: "undecided", 1: "low", 2: "mid", 3: "full"}
 SUPPLY_RPM_CEILING = {0: 4000, 1: 2700, 2: 3300, 3: 4000}
 SUPPLY_MAX_GEAR = {0: 4, 1: 2, 2: 3, 3: 4}
 GEAR_NAMES = ["quiet", "standard", "strong", "overclock"]
+# Effective gear count by model. Base BS3 ACKs 0x08 gear 04 but the 0xEF
+# push keeps reporting gear 3 — only 3 steps exist (Pro unverified,
+# keeps 4; the 4th flash slot still reads/writes via 0x26/0x27).
+MODEL_GEARS = {"BS3": ["quiet", "standard", "strong"]}
+
+
+def model_gears(model: str | None) -> list[str]:
+    """Selectable gear names for a model name from PIDS (unknown -> all 4)."""
+    return list(MODEL_GEARS.get(model or "", GEAR_NAMES))
 STANDBY_NAMES = {0: "off", 1: "instant", 2: "delayed"}
 
 MIN_RPM = 0      # genuine passive stop
 STALL_LO, STALL_HI = 1, 499  # worse than useless, tach flips 0-400
 FLOOR_RPM = 500  # practical floor
-MAX_RPM = 4000   # hardware rating
+MAX_RPM = 4000   # vendor hardware rating (Pro; base BS3 saturates ~3400)
+
+# Measured motor ceilings by model (base BS3 holds ~3300-3400 with 4000
+# commanded at supply 3 — physical saturation, target echoes raw).
+# Models absent here keep the 4000 rating (Pro unverified, do not lower
+# without measuring one).
+MODEL_RPM_CEILING = {"BS3": 3400}
+# Models with no side LED strip (gear LEDs only; 0x46/0x44 unacked on
+# base BS3 fw 0.0.2.4). Absent models keep strip controls (status quo).
+MODEL_HAS_STRIP = {"BS3": False}
+
+
+def model_ceiling(model: str | None) -> int:
+    """Command ceiling for a model name from PIDS (None/unknown -> 4000)."""
+    return min(MODEL_RPM_CEILING.get(model or "", MAX_RPM), MAX_RPM)
 
 
 class UnsafeCommandError(ValueError):
@@ -254,10 +277,10 @@ def decode_status(report: bytes) -> Status:
     )
 
 
-def clamp_rpm(rpm: int, supply: int = 3) -> int:
-    """Apply stall-band + supply-ceiling rules. 0 stays 0 (passive stop)."""
+def clamp_rpm(rpm: int, supply: int = 3, model: str | None = None) -> int:
+    """Apply stall-band + supply-ceiling + model-ceiling rules. 0 stays 0 (passive stop)."""
     if rpm <= 0:
         return 0
     if STALL_LO <= rpm <= STALL_HI:
         return FLOOR_RPM
-    return min(rpm, SUPPLY_RPM_CEILING.get(supply, 4000), MAX_RPM)
+    return min(rpm, SUPPLY_RPM_CEILING.get(supply, 4000), model_ceiling(model))

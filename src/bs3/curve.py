@@ -48,6 +48,7 @@ class Curve:
         return pts[-1][1]
 
     def update(self, raw_c: float, supply: int = 3,
+               model: str | None = None,
                alpha_up: float = 0.5, alpha_down: float = 0.15) -> tuple[int, bool]:
         """Feed a raw reading. Returns (rpm_to_send, changed).
 
@@ -60,9 +61,9 @@ class Curve:
             a = alpha_up if raw_c > self._smooth else alpha_down
             self._smooth += a * (raw_c - self._smooth)
         temp = raw_c if raw_c >= self.panic_c else self._smooth
-        want = P.clamp_rpm(self.target_for(temp), supply)
+        want = P.clamp_rpm(self.target_for(temp), supply, model)
         if raw_c >= self.panic_c:
-            want = P.clamp_rpm(4000, supply)
+            want = P.clamp_rpm(4000, supply, model)
         if self._last_sent is None or abs(want - self._last_sent) >= self.deadband \
                 or (want == 0) != (self._last_sent == 0):
             self._last_sent = want

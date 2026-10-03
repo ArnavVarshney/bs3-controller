@@ -155,6 +155,8 @@ class HidCooler:
     def gear_table(self) -> list[int]:
         f = self.transact(P.CMD_QUERY_GEARS)
         payload = f[4:-1]
+        if len(payload) < 8:
+            raise RuntimeError("short gear-table reply")
         return [int.from_bytes(payload[i:i + 2], "little") for i in range(0, 8, 2)]
 
     def rpm(self) -> tuple[int, int]:
@@ -165,9 +167,9 @@ class HidCooler:
         return self.transact(P.CMD_WORK_MODE)[4]
 
     # -- fan control --
-    def set_realtime_rpm(self, rpm: int, supply: int = 3) -> int:
+    def set_realtime_rpm(self, rpm: int, supply: int = 3, model: str | None = None) -> int:
         """Enter realtime + hold rpm. Returns the clamped rpm actually sent."""
-        rpm = P.clamp_rpm(rpm, supply)
+        rpm = P.clamp_rpm(rpm, supply, model)
         self.transact(P.CMD_ENTER_REALTIME)
         ack = self.transact(P.CMD_SET_RPM, rpm.to_bytes(2, "little"))
         if ack[4] != 0x01:

@@ -37,12 +37,7 @@
 
   <section class="card">
     <h2>Fan</h2>
-    <div class="gearBtns" id="gearBtns">
-      <button data-gear="quiet">Quiet</button>
-      <button data-gear="standard">Standard</button>
-      <button data-gear="strong">Strong</button>
-      <button data-gear="overclock">Overclock</button>
-    </div>
+    <div class="gearBtns" id="gearBtns"></div>
     <label class="lbl">Manual RPM <span id="rpmVal">1700</span></label>
     <div class="row"><input id="rpm" type="range" min="0" max="4000" step="50" value="1700"><button id="btnRpm">Set</button></div>
     <div class="row"><button id="btnAuto">Release to gear (auto)</button>
@@ -54,7 +49,7 @@
     <h2>Temp curve</h2>
     <svg id="curve" viewBox="0 0 400 220" width="100%" height="220"></svg>
     <div class="row"><button id="btnCurveSave">Save curve + enable</button><button id="btnCurveReset" class="ghost">Reset</button></div>
-    <p class="muted">Drag points · double-click adds · right-click removes (2–8 pts).</p>
+    <p class="muted">Drag points · double-click adds · right-click removes (2–8 pts). Curve stays monotonic — pushed neighbors yield.</p>
   </section>
 
   <section class="card">
@@ -63,6 +58,7 @@
       <label class="toggle"><input type="checkbox" id="gearLedOn" checked> <span>Gear LEDs</span></label></div>
     <div class="fx" id="fxBtns"></div>
     <p class="muted" id="fxHint">Presets 1–5 need realtime fan mode — set an RPM first.</p>
+    <p class="muted" id="stripNote" hidden>No side strip on this model (gear LEDs only) — strip controls disabled.</p>
     <div class="row"><input type="color" id="color" value="#68d391"><input id="bright" type="range" min="5" max="100" value="70"><button id="btnUpload">Upload color</button></div>
   </section>
 
@@ -80,7 +76,7 @@
   </section>
 </main>
 
-<footer class="muted">Open-source, localhost only. Dangerous commands (0xDF brick, 0x06 reset…) are blocked client-side and in firmware docs.</footer>
+<footer class="muted">Open-source, localhost only. Dangerous commands (0xDF brick, 0x06 reset…) are blocked by the server's command blocklist.</footer>
 <script src="/app.js"></script>
 </body>
 </html>

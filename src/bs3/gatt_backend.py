@@ -103,9 +103,9 @@ class GattCooler:
         while not self._q.empty():
             self._q.get_nowait()
         await self.write(cmd, payload)
-        end = asyncio.get_event_loop().time() + timeout
+        end = asyncio.get_running_loop().time() + timeout
         while True:
-            left = end - asyncio.get_event_loop().time()
+            left = end - asyncio.get_running_loop().time()
             if left <= 0:
                 raise TimeoutError(f"0x{cmd:02X}: no reply")
             frame = await asyncio.wait_for(self._q.get(), left)
@@ -114,14 +114,22 @@ class GattCooler:
             # stray 0xEF push, keep waiting
 
     async def status(self, timeout: float = 3.0) -> P.Status:
+        """Wait for the next unsolicited 0xEF frame (not the 0x25 reply)."""
         while not self._q.empty():
             self._q.get_nowait()
         await self.write(P.CMD_WORK_MODE)
-        frame = await asyncio.wait_for(self._q.get(), timeout)
-        # decode_status expects report offsets; wrap bare frame with dummy id
-        # NOTE: bare FFF1 frames are shorter than hid reports; pad to 17B.
-        raw = bytes((P.REPORT_IN,)) + bytes(frame) + bytes(17)
-        return P.decode_status(raw[:17])
+        end = asyncio.get_running_loop().time() + timeout
+        while True:
+            left = end - asyncio.get_running_loop().time()
+            if left <= 0:
+                raise TimeoutError("no 0xEF status push (is the cooler on?)")
+            frame = await asyncio.wait_for(self._q.get(), left)
+            if frame[2] != P.CMD_STATUS_PUSH:
+                continue  # 0x25 ack or other reply, keep waiting
+            # decode_status expects report offsets; wrap bare frame with dummy id
+            # NOTE: bare FFF1 frames are shorter than hid reports; pad to 17B.
+            raw = bytes((P.REPORT_IN,)) + bytes(frame) + bytes(17)
+            return P.decode_status(raw[:17])
 
     async def close(self) -> None:
         try:
