@@ -15,10 +15,12 @@
 cable to the laptop. <b>Stop bs3-web first</b> — one process must own the pad.</p>
 <div>
   <button id="connect">Connect</button>
+  <button id="listen" disabled>Listen 3s (no writes)</button>
   <button id="status" disabled>Status</button>
   <button id="info" disabled>FW + supply + gears</button>
   <button id="spin" disabled>Realtime 2000</button>
   <button id="release" disabled>Release</button>
+  <label><input type="checkbox" id="dbg" checked> raw traffic log</label>
 </div>
 <pre id="log">not connected</pre>
 <script src="./protocol.js"></script>
@@ -32,9 +34,18 @@ let cooler = null;
 $("connect").onclick = async () => {
   try {
     cooler = await HidCooler.request();
+    cooler.debug = (m) => { if ($("dbg").checked) log("DBG " + JSON.stringify(m)); };
     log("open: " + cooler.label);
-    for (const id of ["status", "info", "spin", "release"]) $(id).disabled = false;
+    log("collections: " + JSON.stringify(cooler.device.collections, (k, v) => typeof v === "bigint" ? Number(v) : v));
+    for (const id of ["listen", "status", "info", "spin", "release"]) $(id).disabled = false;
   } catch (e) { log("connect FAILED: " + e.message); }
+};
+$("listen").onclick = async () => {
+  try {
+    const before = cooler._rxRaw;
+    await new Promise((r) => setTimeout(r, 3000));
+    log(`listen: ${cooler._rxRaw - before} raw input reports in 3s (wrote nothing)`);
+  } catch (e) { log("listen FAILED: " + e.message); }
 };
 $("status").onclick = async () => {
   try {

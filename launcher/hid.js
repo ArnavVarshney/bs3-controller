@@ -29,9 +29,16 @@ class HidCooler {
   constructor(device) {
     this.device = device;
     this._queue = [];
+    this.debug = null; // fn(obj) — raw traffic tap for diagnosis
+    this._rxRaw = 0;
     this._onReport = (e) => {
       const data = Array.from(
         new Uint8Array(e.data.buffer, e.data.byteOffset, e.data.byteLength));
+      this._rxRaw++;
+      if (this.debug) {
+        this.debug({ dir: "rx-raw", n: this._rxRaw, reportId: e.reportId,
+                     len: data.length, head: data.slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join(" ") });
+      }
       const frame = P.extractUsbFrame(data);
       if (frame) this._queue.push(frame);
     };
@@ -64,6 +71,7 @@ class HidCooler {
 
   async _send(cmd, payload) {
     const out = P.buildUsbReport(cmd, payload || []);
+    if (this.debug) this.debug({ dir: "tx", cmd: "0x" + cmd.toString(16), len: out.length });
     // USB descriptor has no report ids: reportId 0 + 31 payload bytes.
     await this.device.sendReport(0, new Uint8Array(out));
     await sleep(WRITE_GAP_MS);
