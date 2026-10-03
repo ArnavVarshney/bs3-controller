@@ -17,7 +17,7 @@ jobs:
       - run: pip install -e .[dev]
       - run: python -m pytest tests/ -q
 
-  js-protocol:
+  js-launcher:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,3 +25,6 @@ jobs:
         with:
           node-version: "lts/*"
       - run: node launcher/protocol.test.js
+      - run: node launcher/rgb.test.js
+      - run: node launcher/device.test.js
+      - run: node --check launcher/protocol.js && node --check launcher/rgb.js && node --check launcher/hid.js && node --check launcher/gatt.js && node --check launcher/device.js && node --check launcher/app.js
