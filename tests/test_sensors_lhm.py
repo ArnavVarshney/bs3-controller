@@ -45,6 +45,7 @@ def test_ignores_garbage_and_empty():
     assert S._find_cpu_temp(bad) is None
 
 
-def test_http_none_when_no_server():
+def test_http_none_when_no_server(monkeypatch):
+    monkeypatch.setenv("BS3_LHM_PORT", "9")  # dead port, nothing listens
     S._win_cache.update(at=0.0, value=None)
     assert S._lhm_http_temp() is None
