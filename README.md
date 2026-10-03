@@ -51,23 +51,26 @@ holds its physical max.
 
 ## Platform support
 
-Linux-only for hardware control — and deliberately so. Every hardware path
-is a Linux API: hidraw (`/dev/hidraw*`, enumerated via `/sys`) for
-paired/USB control, BlueZ D-Bus for unpaired-BLE GATT, hwmon for CPU
-temperature, udev for rootless device access. There is nothing Windows- or
-macOS-shaped in that stack.
+Two control planes, pick either (or both):
 
-What *is* portable (pure Python, no OS calls): the protocol framing,
-fan-curve logic, RGB builders, and the dashboard UI. On a non-Linux machine
-everything imports and runs, but with no cooler detectable the tools
-degrade to demo mode (`bs3-web --demo`, empty `bs3ctl list`) — useful for
-UI development, not for cooling.
+- **Browser launcher (`launcher/`, no install, Win/Mac/Linux)** — the
+  platform-agnostic path, Keychron-Launcher-style. Static page, Chrome/Edge:
+  WebHID over the USB-C data cable (all three OSes), WebBluetooth GATT
+  FFF2/F1 (Win/Mac; Linux Chrome hides it behind a flag). Full control:
+  status, gears, exact-RPM override, gear table, lighting, standby — same
+  blocklist and per-model caps as the Python side. Serve with
+  `cd launcher && python3 -m http.server 8000` → http://127.0.0.1:8000/
+  (or host the dir anywhere over HTTPS). Browsers expose no CPU-temp API,
+  so temp-curve *automation* stays with the backend below.
+- **Python backend (Linux, for automation)** — `bs3ctl`/`bs3-web` speak
+  hidraw (`/dev/hidraw*`) for paired/USB control, BlueZ D-Bus for
+  unpaired-BLE GATT, hwmon for CPU temperature, udev for rootless access.
+  This is the only place temp curves run (`monitor`, auto-curve).
 
-A Windows port would mean new backends, not new packaging: HID via `hidapi`
-/`hid`, BLE via Bleak instead of BlueZ, CPU temperature via WMI or
-LibreHardwareMonitor, plus an installer story to replace the udev rule.
-That is a real feature project; contributions welcome, but v0.1.0 does not
-attempt it.
+What *is* portable in Python (pure, no OS calls): protocol framing,
+fan-curve logic, RGB builders, dashboard UI. On non-Linux the tools import
+and run but degrade to demo mode (`bs3-web --demo`, empty `bs3ctl list`) —
+use the browser launcher for real hardware there instead of porting hidraw.
 
 ## Install
 
@@ -116,11 +119,11 @@ bs3-web --port 8080           # custom port, still localhost-only
 Without hardware attached the dashboard falls back to a demo cooler (banner
 shows DEMO) so the UI stays explorable.
 
-Browser-native control (experimental, in development — see `launcher/`):
-a dependency-free JS port of the protocol for a Keychron-Launcher-style
-static page (WebHID over USB on Win/Mac/Linux, WebBluetooth GATT on
-Win/Mac only). Browsers can't read CPU temperature, so temp-curve
-automation stays with the Python backend.
+Browser launcher (no install — see `launcher/`): the same dashboard as a
+static page that talks to the cooler directly — WebHID over USB on
+Win/Mac/Linux, WebBluetooth GATT on Win/Mac, local `bs3-web` backend when
+present, demo otherwise. Temp-curve automation stays with the Python
+backend (no CPU-temp API in browsers).
 
 ### HTTP API
 
@@ -201,7 +204,7 @@ src/bs3/device_manager.py single-owner device owner for the webapp (+ demo coole
 src/bs3/webapp.py         bs3-web entry: localhost dashboard + JSON API
 src/bs3/web/              dashboard UI (index.html, style.css, app.js)
 tests/                    pytest suite (protocol, curve, rgb, manager-demo, webapp HTTP)
-launcher/                 experimental browser launcher (protocol.js + parity tests)
+launcher/                 browser launcher (protocol.js/rgb.js/hid.js/gatt.js/device.js/app.js + index.html, parity tests)
 udev/                     hidraw permission rule
 ```
 
@@ -210,6 +213,9 @@ udev/                     hidraw permission rule
 ```bash
 pip install -e .[dev]
 python -m pytest tests/ -q
+node launcher/protocol.test.js
+node launcher/rgb.test.js
+node launcher/device.test.js
 ```
 
 Hardware tests are opt-in by presence: the suite patches out hidraw access,
