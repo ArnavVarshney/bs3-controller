@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<link rel="icon" href="data:,">
 <title>BS3 WebHID smoke test</title>
 <style>
   body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
@@ -24,9 +25,9 @@ cable to the laptop. <b>Stop bs3-web first</b> — one process must own the pad.
   <label><input type="checkbox" id="dbg" checked> raw traffic log</label>
 </div>
 <pre id="log">not connected</pre>
-<script src="./protocol.js"></script>
-<script src="./hid.js"></script>
-<script src="./gatt.js"></script>
+<script src="./protocol.js?v=0.2"></script>
+<script src="./hid.js?v=0.2"></script>
+<script src="./gatt.js?v=0.3"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
