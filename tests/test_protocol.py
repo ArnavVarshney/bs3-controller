@@ -13,6 +13,14 @@ def test_checksum_known():
     assert f.hex() == "5aa52104280a57"
 
 
+def test_extract_usb_frame():
+    # USB/WebHID reads carry no report id: magic at offset 0
+    urep = P.build_usb_report(0x25) + bytes(1)  # 32B read
+    f = P.extract_usb_frame(urep)
+    assert f and f[2] == 0x25
+    assert P.extract_usb_frame(bytes(6)) is None
+
+
 def test_blocked_commands():
     for cmd in (0xDF, 0x06, 0x03, 0xF1, 0xF2, 0x0A):
         try:

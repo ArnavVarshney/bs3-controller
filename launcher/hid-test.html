@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>BS3 WebHID smoke test</title>
+<style>
+  body { font: 14px/1.5 system-ui, sans-serif; max-width: 720px; margin: 2em auto; padding: 0 1em; }
+  button { margin: 2px; padding: 6px 12px; }
+  pre { background: #f4f4f4; padding: 1em; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>BS3 WebHID smoke test</h1>
+<p>Chrome/Edge, served over http://localhost (not file://). USB-C <b>data</b>
+cable to the laptop. <b>Stop bs3-web first</b> — one process must own the pad.</p>
+<div>
+  <button id="connect">Connect</button>
+  <button id="status" disabled>Status</button>
+  <button id="info" disabled>FW + supply + gears</button>
+  <button id="spin" disabled>Realtime 2000</button>
+  <button id="release" disabled>Release</button>
+</div>
+<pre id="log">not connected</pre>
+<script src="./protocol.js"></script>
+<script src="./hid.js"></script>
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const log = (m) => { $("log").textContent += "\n" + m; };
+let cooler = null;
+
+$("connect").onclick = async () => {
+  try {
+    cooler = await HidCooler.request();
+    log("open: " + cooler.label);
+    for (const id of ["status", "info", "spin", "release"]) $(id).disabled = false;
+  } catch (e) { log("connect FAILED: " + e.message); }
+};
+$("status").onclick = async () => {
+  try {
+    const s = await cooler.statusPush();
+    log(`mode=${s.asleep ? "asleep" : s.realtime ? "realtime" : "gear"} cur=${s.currentRpm} tgt=${s.targetRpm} gear=${s.gear} supply=${s.supplyName} seq=${s.seq}`);
+  } catch (e) { log("status FAILED: " + e.message); }
+};
+$("info").onclick = async () => {
+  try {
+    log("fw=" + await cooler.fwVersion() + " supply=" + await cooler.supplyLevel() +
+      " gears=" + JSON.stringify(await cooler.gearTable()));
+  } catch (e) { log("info FAILED: " + e.message); }
+};
+$("spin").onclick = async () => {
+  try {
+    // supply 1 over laptop USB: 2700 cap applies
+    log("sent=" + await cooler.setRealtimeRpm(2000, 1, "BS3") + " rpm");
+  } catch (e) { log("spin FAILED: " + e.message); }
+};
+$("release").onclick = async () => {
+  try { await cooler.releaseToGear(); log("released to gear"); }
+  catch (e) { log("release FAILED: " + e.message); }
+};
+</script>
+</body>
+</html>

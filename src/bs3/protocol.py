@@ -205,6 +205,21 @@ def extract_frame(report: bytes) -> bytes | None:
     return bytes(frame)
 
 
+def extract_usb_frame(report: bytes) -> bytes | None:
+    """Pull a bare frame out of a raw USB read (WebHID style).
+
+    USB reads carry no report id: magic sits at offset 0, not 1.
+    Same validation otherwise.
+    """
+    if len(report) < 5 or report[0:2] != MAGIC:
+        return None
+    total = report[3] + 3
+    frame = report[0:total]
+    if len(frame) < total or not verify_frame(frame):
+        return None
+    return bytes(frame)
+
+
 @dataclass
 class Status:
     current_rpm: int

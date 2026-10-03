@@ -134,6 +134,16 @@ function extractFrame(report) {
   return frame;
 }
 
+/** Pull a bare frame out of a raw USB read (WebHID style: no report id,
+ * magic at offset 0). Same validation otherwise. */
+function extractUsbFrame(report) {
+  if (report.length < 5 || report[0] !== MAGIC0 || report[1] !== MAGIC1) return null;
+  const total = report[3] + 3;
+  const frame = report.slice(0, total);
+  if (frame.length < total || !verifyFrame(frame)) return null;
+  return frame;
+}
+
 function clampRpm(rpm, supply = 3, model = null) {
   if (rpm <= 0) return 0;
   if (rpm >= STALL_LO && rpm <= STALL_HI) return FLOOR_RPM;
@@ -174,16 +184,19 @@ function decodeStatus(report) {
   };
 }
 
+const API = {
+  VID, PIDS, REPORT_IN, REPORT_OUT, BT_REPORT_LEN, USB_WRITE_LEN, MAX_PAYLOAD,
+  CMD_FW_VERSION, CMD_SUPPLY, CMD_SELECT_GEAR, CMD_SET_GEAR_RPM, CMD_QUERY_GEARS,
+  CMD_STANDBY, CMD_SET_RPM, CMD_ENTER_REALTIME, CMD_EXIT_REALTIME,
+  CMD_LIGHT_COMMIT, CMD_SELECT_EFFECT, CMD_STRIP_POWER, CMD_GEAR_LED, CMD_STATUS_PUSH,
+  BLOCKED, SUPPLY_NAMES, SUPPLY_RPM_CEILING, SUPPLY_MAX_GEAR, GEAR_NAMES, STANDBY_NAMES,
+  FLOOR_RPM, MAX_RPM, MODEL_RPM_CEILING, MODEL_HAS_STRIP, MODEL_GEARS,
+  modelCeiling, modelHasStrip, modelGears,
+  checkSafe, buildFrame, buildBtReport, buildUsbReport, verifyFrame, extractFrame, extractUsbFrame,
+  clampRpm, decodeStatus,
+};
 if (typeof module !== "undefined") {
-  module.exports = {
-    VID, PIDS, REPORT_IN, REPORT_OUT, BT_REPORT_LEN, USB_WRITE_LEN, MAX_PAYLOAD,
-    CMD_FW_VERSION, CMD_SUPPLY, CMD_SELECT_GEAR, CMD_SET_GEAR_RPM, CMD_QUERY_GEARS,
-    CMD_STANDBY, CMD_SET_RPM, CMD_ENTER_REALTIME, CMD_EXIT_REALTIME,
-    CMD_LIGHT_COMMIT, CMD_SELECT_EFFECT, CMD_STRIP_POWER, CMD_GEAR_LED, CMD_STATUS_PUSH,
-    BLOCKED, SUPPLY_NAMES, SUPPLY_RPM_CEILING, SUPPLY_MAX_GEAR, GEAR_NAMES, STANDBY_NAMES,
-    FLOOR_RPM, MAX_RPM, MODEL_RPM_CEILING, MODEL_HAS_STRIP, MODEL_GEARS,
-    modelCeiling, modelHasStrip, modelGears,
-    checkSafe, buildFrame, buildBtReport, buildUsbReport, verifyFrame, extractFrame,
-    clampRpm, decodeStatus,
-  };
+  module.exports = API; // node/bun (tests)
+} else if (typeof window !== "undefined") {
+  window.bs3protocol = API; // plain <script> include, no bundler
 }
