@@ -116,6 +116,12 @@ bs3-web --port 8080           # custom port, still localhost-only
 Without hardware attached the dashboard falls back to a demo cooler (banner
 shows DEMO) so the UI stays explorable.
 
+Browser-native control (experimental, in development — see `launcher/`):
+a dependency-free JS port of the protocol for a Keychron-Launcher-style
+static page (WebHID over USB on Win/Mac/Linux, WebBluetooth GATT on
+Win/Mac only). Browsers can't read CPU temperature, so temp-curve
+automation stays with the Python backend.
+
 ### HTTP API
 
 | Method | Route | Body |
@@ -195,6 +201,7 @@ src/bs3/device_manager.py single-owner device owner for the webapp (+ demo coole
 src/bs3/webapp.py         bs3-web entry: localhost dashboard + JSON API
 src/bs3/web/              dashboard UI (index.html, style.css, app.js)
 tests/                    pytest suite (protocol, curve, rgb, manager-demo, webapp HTTP)
+launcher/                 experimental browser launcher (protocol.js + parity tests)
 udev/                     hidraw permission rule
 ```
 
