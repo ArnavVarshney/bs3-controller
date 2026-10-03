@@ -100,8 +100,10 @@ _CPU_TEMP_NAMES = ("CPU Package", "Tctl", "Tdie", "CPU Core Max", "Core Max",
 def _find_cpu_temp(tree: dict) -> float | None:
     """Walk an LHM data.json tree, return the best CPU temperature reading.
 
-    Prefers known package sensors, else the hottest plausible CPU reading.
-    Pure function (unit-tested); tolerant of missing keys/shape drift.
+    Only leaves under a *Temperature* sensor group count — the tree mixes
+    clocks (MHz), loads (%), power (W) and volts (V) whose bare numbers
+    would otherwise pass any range check. Prefers known package sensors,
+    else the hottest temperature-group reading. Pure function (unit-tested).
     """
     found: list[tuple[str, str, float]] = []
 
@@ -113,26 +115,29 @@ def _find_cpu_temp(tree: dict) -> float | None:
             return None
         return f if 0 < f < 150 else None
 
-    def walk(node: dict, hw: str):
+    def walk(node: dict, hw: str, group: str):
         if not isinstance(node, dict):
             return
         kids = node.get("Children") or []
         text = str(node.get("Text", ""))
         if kids:
+            leaves = [k for k in kids if isinstance(k, dict) and not (k.get("Children") or [])]
+            g = text if leaves else group
+            h = text if "cpu" in text.lower() or "ryzen" in text.lower() \
+                or "intel" in text.lower() or "amd" in text.lower() else hw
             for k in kids:
-                walk(k, text if "cpu" in text.lower() or "ryzen" in text.lower()
-                     or "intel" in text.lower() or "amd" in text.lower() else hw)
-        else:
+                walk(k, h, g)
+        elif "temp" in group.lower() and hw:
             v = num(node.get("Value"))
-            if v is not None and hw:
+            if v is not None:
                 found.append((hw, text, v))
 
-    walk(tree, "")
+    walk(tree, "", "")
     if not found:
         return None
     for want in _CPU_TEMP_NAMES:
         for _, name, v in found:
-            if name == want:
+            if name == want or want in name:
                 return v
     return max(v for _, _, v in found)
 
