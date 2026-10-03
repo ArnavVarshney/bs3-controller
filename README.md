@@ -72,12 +72,12 @@ Two control planes, pick either (or both):
   Windows with no browser involved. CPU temp falls back to
   LibreHardwareMonitor's WMI provider while it runs (portable .zip, run as
   admin — namespace `root\LibreHardwareMonitor`), then to the WMI thermal
-  zone where present; with no source the curve stays inert, same as demo.
+  zone where present; with no source the curve stays inert.
 
 What *is* portable in Python (pure, no OS calls): protocol framing,
-fan-curve logic, RGB builders, dashboard UI. On non-Linux the tools import
-and run but degrade to demo mode (`bs3-web --demo`, empty `bs3ctl list`) —
-use the browser launcher for real hardware there instead of porting hidraw.
+fan-curve logic, RGB builders, dashboard UI. With no cooler attached the
+tools report it plainly (`bs3ctl list` empty, dashboard error banner) and
+keep retrying — no simulation.
 
 ## Install
 
@@ -133,20 +133,20 @@ Web dashboard (localhost only, no auth — runs as your user):
 
 ```bash
 bs3-web                       # http://127.0.0.1:8765 (real hardware if present)
-bs3-web --demo                # explore the UI with a simulated cooler
 bs3-web --port 8080           # custom port, still localhost-only
 bs3-web --transport ble       # BLE GATT via bleak (Windows-capable; needs .[ble])
 bs3-web --transport ble --address DC:7F:64:2B:F0:FE   # skip the scan
 ```
 
-Without hardware attached the dashboard falls back to a demo cooler (banner
-shows DEMO) so the UI stays explorable.
+Without hardware attached the dashboard shows an error banner and empty
+gauges (no simulation); the backend keeps retrying so a pad that appears
+later connects on its own.
 
 Browser launcher (no install — see `launcher/`): the same dashboard as a
 static page that talks to the cooler directly — WebHID over USB on
 Win/Mac/Linux, WebBluetooth GATT on Win/Mac, local `bs3-web` backend when
-present, demo otherwise. Temp-curve automation stays with the Python
-backend (no CPU-temp API in browsers).
+present, honest idle state otherwise. Temp-curve automation stays with the
+Python backend (no CPU-temp API in browsers).
 
 ### HTTP API
 
@@ -180,7 +180,8 @@ Settings persist to `~/.config/bs3-controller/config.json`.
 - `link lost — retrying` — Bluetooth dropout; the tools reconnect on their
   own (realtime overrides don't survive a reconnect, the curve monitor
   re-applies them).
-- Web UI shows DEMO — no cooler detected; pair/plug it and hit Reconnect.
+- Backend error banner instead of gauges — no cooler detected; pair/plug
+  (or power on) the pad and hit Reconnect (the backend also retries alone).
 
 ## Protocol notes (condensed from FIRMWARE.md)
 
@@ -223,10 +224,10 @@ src/bs3/sensors.py        hwmon CPU temp
 src/bs3/curve.py          fan-curve + smoothing + deadband + panic
 src/bs3/rgb.py            strip header/frame builders, presets table
 src/bs3/controller_cli.py bs3ctl entry
-src/bs3/device_manager.py single-owner device owner for the webapp (+ demo cooler)
+src/bs3/device_manager.py single-owner device owner for the webapp (no-hardware error state, auto-retry)
 src/bs3/webapp.py         bs3-web entry: localhost dashboard + JSON API
 src/bs3/web/              dashboard UI (index.html, style.css, app.js)
-tests/                    pytest suite (protocol, curve, rgb, manager-demo, webapp HTTP, bleak-backend fake-GATT)
+tests/                    pytest suite (protocol, curve, rgb, manager no-hardware + stub-hardware, webapp HTTP, bleak-backend fake-GATT)
 launcher/                 browser launcher (protocol.js/rgb.js/hid.js/gatt.js/device.js/app.js + index.html, parity tests)
 packaging/                Windows installer (PyInstaller spec/shims, LHM fetch + attribution, Inno Setup iss, build README)
 udev/                     hidraw permission rule

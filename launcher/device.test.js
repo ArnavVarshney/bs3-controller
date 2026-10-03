@@ -1,61 +1,109 @@
 "use strict";
-/* device.js smoke tests — DemoDevice + protocol helpers, no hardware.
+/* device.js tests — BackendDevice against a stub /api server, snapshot
+ * helpers, protocol model helpers. No hardware, no simulation.
  * Runner-free: `node launcher/device.test.js`. Exit non-zero on failure.
- * (DirectDevice/BackendDevice need WebHID/BLE/fetch + hardware; covered by
- *  hid-test.html diagnostics and the Python webapp suite instead.)
  */
 const assert = require("assert");
+const http = require("http");
 const D = require("./device.js");
 const P = require("./protocol.js");
 
 let n = 0;
-function ok(name, fn) {
-  return Promise.resolve().then(fn).then(() => { n++; console.log(`ok ${name}`); });
+async function ok(name, fn) {
+  await fn();
+  n++;
+  console.log(`ok ${name}`);
+}
+
+const SNAP = {
+  error: null,
+  coolers: [{ node: "ble", model: "BS3", transport: "gatt" }],
+  model: "BS3", has_strip: false, max_rpm: 3400, fw: "0.0.2.4",
+  status: { current_rpm: 1700, target_rpm: 1700, mode: "gear" },
+  cpu_temp: 55.5, supply: 3, gears: [1700, 2400, 2900, 4000],
+  gear_names: ["quiet", "standard", "strong"],
+  light: { strip: true }, curve: [[35, 1000], [85, 4000]],
+  auto_curve: false, history: [], effects: [],
+};
+
+function stubServer() {
+  const seen = [];
+  const srv = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => { body += c; });
+    req.on("end", () => {
+      seen.push({ method: req.method, url: req.url, body });
+      res.setHeader("Content-Type", "application/json");
+      if (req.url === "/api/status" && req.method === "GET") {
+        res.end(JSON.stringify(SNAP));
+      } else if (req.url === "/api/rpm" && req.method === "POST") {
+        res.end(JSON.stringify({ target_rpm: 2000, status_snapshot: SNAP }));
+      } else if (req.url === "/api/bad" && req.method === "POST") {
+        res.statusCode = 400;
+        res.end(JSON.stringify({ error: "nope" }));
+      } else {
+        res.statusCode = 404;
+        res.end(JSON.stringify({ error: "unknown endpoint" }));
+      }
+    });
+  });
+  return new Promise((resolve) => {
+    srv.listen(0, "127.0.0.1", () => resolve({ srv, seen, base: `http://127.0.0.1:${srv.address().port}` }));
+  });
 }
 
 (async () => {
-  await ok("demo snapshot shape matches /api/status", async () => {
-    const dev = new D.DemoDevice();
-    const s = await dev.snapshot();
-    for (const k of ["demo", "model", "has_strip", "max_rpm", "fw", "status",
-                     "cpu_temp", "supply", "gears", "gear_names", "light",
-                     "curve", "auto_curve", "history", "effects"]) {
-      assert.ok(k in s, `missing ${k}`);
+  await ok("backend snapshot passes through", async () => {
+    const { srv, base } = await stubServer();
+    try {
+      const dev = new D.BackendDevice(base);
+      assert.deepStrictEqual(await dev.snapshot(), SNAP);
+    } finally {
+      srv.close();
     }
-    assert.strictEqual(s.demo, true);
-    assert.ok(Array.isArray(s.gears) && s.gears.length === 4);
-    assert.ok(Array.isArray(s.effects) && s.effects.length === 6);
-    assert.strictEqual(s.cpu_temp, null); // browsers expose no CPU-temp API
   });
 
-  await ok("demo fan actions ramp target", async () => {
-    const dev = new D.DemoDevice();
-    await dev.setRpm(2600);
-    let s = await dev.snapshot();
-    assert.strictEqual(s.status.target_rpm, 2600);
-    assert.strictEqual(s.status.realtime, true);
-    await dev.selectGear("strong");
-    s = await dev.snapshot();
-    assert.strictEqual(s.status.realtime, false);
-    await dev.release();
-    s = await dev.snapshot();
-    assert.strictEqual(s.status.mode, "gear");
+  await ok("backend actions post + render snapshot", async () => {
+    const { srv, seen, base } = await stubServer();
+    try {
+      const dev = new D.BackendDevice(base);
+      await dev.setRpm(2000);
+      assert.strictEqual(seen.length, 1);
+      assert.strictEqual(seen[0].url, "/api/rpm");
+      assert.deepStrictEqual(JSON.parse(seen[0].body), { rpm: 2000 });
+    } finally {
+      srv.close();
+    }
   });
 
-  await ok("demo lighting + curve + gears", async () => {
-    const dev = new D.DemoDevice();
-    await dev.setStrip(false);
-    await dev.setGearLed(false);
-    await dev.setEffect(3);
-    await dev.uploadColor(255, 0, 0, 80);
-    let s = await dev.snapshot();
-    assert.deepStrictEqual(s.light.color, [255, 0, 0]);
-    await dev.setCurve([[30, 1000], [80, 4000]], false);
-    s = await dev.snapshot();
-    assert.strictEqual(s.auto_curve, false); // automation stays backend-only
-    await dev.setGearTable([1500, 2400, 3000, 3700]);
-    s = await dev.snapshot();
-    assert.deepStrictEqual(s.gears, [1500, 2400, 3000, 3700]);
+  await ok("backend errors surface", async () => {
+    const { srv, base } = await stubServer();
+    try {
+      const dev = new D.BackendDevice(base);
+      await assert.rejects(dev._post("/api/bad", {}), /nope/);
+      await assert.rejects(dev._get("/api/nope"), /unknown endpoint/);
+    } finally {
+      srv.close();
+    }
+  });
+
+  await ok("detectBackend null on refused", async () => {
+    const snap = await D.detectBackend("http://127.0.0.1:9", 200);
+    assert.strictEqual(snap, null);
+  });
+
+  await ok("snake-case status mapping", async () => {
+    const raw = {
+      currentRpm: 1700, targetRpm: 2000, asleep: false,
+      gear: "quiet", effectiveGear: "quiet", realtime: true,
+      supply: 3, supplyName: "full", rpmCeiling: 4000,
+      bleUp: true, usbUp: false, demo: false, standby: "delayed",
+      autostart: true, stripOn: true, gearLedOn: true, ramp: 1, seq: 9,
+    };
+    const s = D.toSnakeStatus(raw);
+    assert.strictEqual(s.mode, "realtime");
+    assert.strictEqual(s.current_rpm, 1700);
+    assert.strictEqual(s.supply_name, "full");
   });
 
   await ok("model helpers shared with protocol", async () => {
@@ -63,7 +111,6 @@ function ok(name, fn) {
     assert.strictEqual(P.modelFromProductId(0x1004), "BS3 Pro");
     assert.strictEqual(P.modelFromBleName("FlyDigi BS3PRO"), "BS3 Pro");
     assert.strictEqual(P.modelFromBleName("FlyDigi BS3"), "BS3");
-    // base BS3: strip-less, 3 gears, 3400 ceiling — UI gates on these
     assert.strictEqual(P.modelHasStrip("BS3"), false);
     assert.deepStrictEqual(P.modelGears("BS3"), ["quiet", "standard", "strong"]);
     assert.strictEqual(P.modelCeiling("BS3"), 3400);

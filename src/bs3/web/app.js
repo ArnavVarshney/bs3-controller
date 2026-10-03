@@ -56,8 +56,7 @@ async function poll() {
 function render(s) {
   SNAP = s;
   const st = s.status;
-  $("demoBadge").hidden = !s.demo;
-  $("dot").className = "dot " + (!st ? "bad" : s.demo ? "demo" : "ok");
+  $("dot").className = "dot " + (!st ? "bad" : "ok");
   $("model").textContent = (s.model || "?") + " · fw " + (s.fw || "?");
   if (!st) return;
 
@@ -75,7 +74,7 @@ function render(s) {
   $("chipStrip").textContent = "strip " + (st.strip_on ? "on" : "off") + " · gear-led " + (st.gear_led_on ? "on" : "off");
   $("chipFw").textContent = "standby " + st.standby + " · autostart " + (st.autostart ? "on" : "off");
   const c0 = (s.coolers && s.coolers[0]) || null;
-  $("trans").textContent = c0 ? (c0.model + " " + c0.node + " " + c0.transport) : (s.demo ? "demo cooler (no hardware)" : "");
+  $("trans").textContent = c0 ? (c0.model + " " + c0.node + " " + c0.transport) : "";
   $("fanIcon").classList.toggle("spin", cur > 0);
 
   // fan controls reflect

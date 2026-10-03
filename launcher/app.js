@@ -1,6 +1,6 @@
 "use strict";
 (function () {
-/* BS3 launcher dashboard: one UI, four transports (backend / USB-HID / BLE-GATT / demo).
+/* BS3 launcher dashboard: one UI, three transports (backend / USB-HID / BLE-GATT).
  * Snapshot shape matches GET /api/status, so rendering is identical to bs3-web.
  * No bundler, no deps. Serve: cd launcher && python3 -m http.server 8000
  * then open http://127.0.0.1:8000/ (secure context: localhost qualifies for WebHID/BLE).
@@ -106,12 +106,15 @@ async function trySameOrigin() {
   }
 }
 
-async function useDemo(reason) {
+async function disconnectDevice(note) {
   if (DEV && DEV.close) { try { await DEV.close(); } catch (_) { /* noop */ } }
-  DEV = new window.bs3device.DemoDevice();
+  DEV = null;
   curveSeeded = fxBuilt = gearBuilt = false; dirty = false;
-  setTransport("demo", reason || "demo cooler — no hardware, UI explorable");
-  await poll();
+  SNAP = null;
+  setTransport("none", note || "not connected");
+  showErr(note || "");
+  $("dot").className = "dot bad";
+  $("model").textContent = "no device";
 }
 
 async function useUsb() {
@@ -150,8 +153,7 @@ async function useBle() {
 function render(s) {
   SNAP = s;
   const st = s.status;
-  $("demoBadge").hidden = !s.demo;
-  $("dot").className = "dot " + (!st ? "bad" : s.demo ? "demo" : "ok");
+  $("dot").className = "dot " + (!st ? "bad" : "ok");
   $("model").textContent = (s.model || "?") + " · fw " + (s.fw || "?");
   if (!st) return;
 
@@ -168,7 +170,7 @@ function render(s) {
   $("chipStrip").textContent = "strip " + (st.strip_on ? "on" : "off") + " · gear-led " + (st.gear_led_on ? "on" : "off");
   $("chipFw").textContent = "standby " + st.standby + " · autostart " + (st.autostart ? "on" : "off");
   const c0 = (s.coolers && s.coolers[0]) || null;
-  $("trans").textContent = c0 ? (c0.model + " " + c0.node + " " + c0.transport) : (s.demo ? "demo cooler (no hardware)" : "");
+  $("trans").textContent = c0 ? (c0.model + " " + c0.node + " " + c0.transport) : "";
   $("fanIcon").classList.toggle("spin", cur > 0);
   $("curveNote").hidden = TRANSPORT === "backend";
 
@@ -389,14 +391,14 @@ function markClean() {
 function wire() {
   $("btnBackend").onclick = async () => {
     setTransport("probing…", "checking for a local backend…");
-    if (!(await useBackend())) await useDemo("no local backend found — demo cooler (connect USB/BLE for hardware)");
+    if (!(await useBackend())) {
+      disconnectDevice("no local backend found — start bs3-web, or connect USB/BLE for hardware");
+    }
   };
   $("btnUsb").onclick = useUsb;
   $("btnBle").onclick = useBle;
-  $("btnDemo").onclick = () => useDemo();
   $("btnDisconnect").onclick = async () => {
-    if (DEV && DEV.close) { try { await DEV.close(); } catch (_) { /* noop */ } }
-    await useDemo("disconnected — demo cooler");
+    await disconnectDevice("disconnected");
   };
   $("rpm").oninput = () => { $("rpmVal").textContent = $("rpm").value; };
   $("btnRpm").onclick = async () => { try { await callAction(DEV.setRpm, Number($("rpm").value)); } catch (e) { showErr(e.message); } };
@@ -436,8 +438,10 @@ function wire() {
 wire();
 drawCurve();
 (async () => {
-  // Auto: backend when bs3-web runs nearby, else demo. USB/BLE on demand.
-  if (!(await useBackend())) await useDemo("no local backend — demo cooler (Start bs3-web, or Connect USB/BLE)");
+  // Auto: backend when bs3-web runs nearby, else an honest idle state.
+  // USB/BLE on demand.
+  await useBackend();
+  if (!DEV) disconnectDevice("no local backend — start bs3-web, or Connect USB/BLE");
   setInterval(poll, 1000);
 })();
 })();

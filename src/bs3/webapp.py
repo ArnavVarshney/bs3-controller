@@ -3,7 +3,7 @@
 
 Stdlib only (no new deps). Serves the UI + JSON API on localhost:
 
-    PYTHONPATH=src python3 -m bs3.webapp [--port 8765] [--demo]
+    PYTHONPATH=src python3 -m bs3.webapp [--port 8765] [--transport ble]
 
 API:
   GET  /api/status            full snapshot (status, cpu_temp, gears, gear_names,
@@ -261,7 +261,6 @@ def main(argv=None) -> int:
     _setup_headless_log()
     ap = argparse.ArgumentParser(prog="bs3-web", description="Local BS3 dashboard (localhost only)")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--demo", action="store_true", help="demo mode: explore the UI without hardware (no hidraw access)")
     ap.add_argument("--transport", choices=("hid", "ble"), default="hid",
                     help="hid=paired/USB hidraw via Linux (default), ble=BLE GATT via bleak (needs .[ble], works on Windows)")
     ap.add_argument("--address", default="auto", help="BLE address for --transport ble (default: first FlyDigi BS found)")
@@ -269,12 +268,12 @@ def main(argv=None) -> int:
                     help="ensure LibreHardwareMonitor runs (Windows CPU temps), started minimized; optional exe path (default: alongside the backend)")
     a = ap.parse_args(argv)
     from . import singleton
-    if not a.demo and not singleton.acquire("BS3Link"):
+    if not singleton.acquire("BS3Link"):
         print(f"bs3-web: {singleton.holder_hint()}", file=sys.stderr)
         return 1
     if a.lhm is not None:
         _ensure_lhm(None if a.lhm == "auto" else a.lhm)
-    mgr = DeviceManager(demo=a.demo, transport=a.transport, address=a.address)
+    mgr = DeviceManager(transport=a.transport, address=a.address)
     Handler.mgr = mgr
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     print(f"bs3-web on http://127.0.0.1:{a.port}  (Ctrl-C stops, localhost only — no auth)")

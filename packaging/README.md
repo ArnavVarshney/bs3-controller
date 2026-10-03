@@ -50,6 +50,7 @@ as `AppVersion`, and attaches installer + exes to the GitHub Release.
 ## Smoketest an exe (no install)
 
 ```powershell
-.\dist\bs3-web.exe --demo --port 8769
-# then http://127.0.0.1:8769/api/status  (demo snapshot) and /app.js (bundled UI)
+.\dist\bs3-web.exe --help
+.\dist\bs3-web.exe --transport ble --address DC:7F:64:2B:F0:FE --port 8769
+# then http://127.0.0.1:8769/api/status (needs the pad advertising)
 ```

@@ -1,7 +1,9 @@
-"""End-to-end HTTP tests against a demo-mode webapp (no hardware).
+"""End-to-end HTTP tests against a hardware-free webapp.
 
 Same patching discipline as test_manager: no hidraw, fixed CPU temp,
-config redirected to tmp.
+config redirected to tmp. Without hardware the API answers truthfully:
+status None plus an error string; hardware actions fail, validation and
+curve config still work.
 """
 
 import json
@@ -36,7 +38,7 @@ def _post(base, path, body):
         return e.code, json.loads(e.read())
 
 
-def test_all_routes_demo():
+def test_all_routes_no_hardware():
     old_coolers, old_temp, old_cfg = H.find_coolers, sensors.cpu_temp, D.CONFIG_PATH
     tmp = tempfile.NamedTemporaryFile(delete=False)
     tmp.close()
@@ -54,7 +56,7 @@ def test_all_routes_demo():
         base = f"http://127.0.0.1:{srv.server_address[1]}"
         code, _ = _get(base, "/")
         assert code == 200
-        for asset, frag in (("/app.js", "javascript"), ("/style.css", "text/css")):
+        for asset in ("/app.js", "/style.css"):
             code, _ = _get(base, asset)
             assert code == 200, asset
         try:
@@ -66,26 +68,33 @@ def test_all_routes_demo():
         code, body = _get(base, "/api/status")
         assert code == 200
         s = json.loads(body)
-        assert s["demo"] is True
+        assert "demo" not in s
+        assert s["status"] is None
+        assert s["error"]
         assert s["gear_names"] == ["quiet", "standard", "strong", "overclock"]
         assert s["max_rpm"] == 4000 and s["has_strip"] is True
+        assert s["cpu_temp"] == 55.0
 
-        posts = [
-            ("/api/rpm", {"rpm": 2600}, 200),
-            ("/api/gear", {"gear": "strong"}, 200),
-            ("/api/auto", {}, 200),
-            ("/api/strip", {"on": False}, 200),
-            ("/api/gear-led", {"on": False}, 200),
-            ("/api/effect", {"effect": 2}, 200),
-            ("/api/rgb-upload", {"r": 1, "g": 2, "b": 3, "brightness": 50}, 200),
-            ("/api/standby", {"mode": "delayed"}, 200),
-            ("/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True}, 200),
-            ("/api/gear-table", {"gears": [1700, 2400, 3000, 3700]}, 200),
-            ("/api/reconnect", {}, 200),
-        ]
-        for path, body, want in posts:
-            code, _ = _post(base, path, body)
-            assert code == want, (path, code)
+        # hardware actions fail honestly (no cooler to drive)
+        for path, body in [
+            ("/api/rpm", {"rpm": 2600}),
+            ("/api/gear", {"gear": "strong"}),
+            ("/api/auto", {}),
+            ("/api/strip", {"on": False}),
+            ("/api/gear-led", {"on": False}),
+            ("/api/effect", {"effect": 2}),
+            ("/api/rgb-upload", {"r": 1, "g": 2, "b": 3, "brightness": 50}),
+            ("/api/standby", {"mode": "delayed"}),
+            ("/api/gear-table", {"gears": [1700, 2400, 3000, 3700]}),
+        ]:
+            code, resp = _post(base, path, body)
+            assert code in (400, 500), (path, code)
+            assert "cooler" in resp.get("error", ""), (path, resp)
+        # curve config is link-independent: works with no hardware
+        code, _ = _post(base, "/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True})
+        assert code == 200
+        code, _ = _post(base, "/api/reconnect", {})
+        assert code == 200
         bads = [
             ("/api/rpm", {}),
             ("/api/rpm", {"rpm": "2600"}),

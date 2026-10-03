@@ -2,14 +2,13 @@
 (function () {
 /* Unified device facade for the launcher UI (Keychron-Launcher-style).
  *
- * One UI, four transports:
+ * One UI, three transports:
  * - BackendDevice: Python bs3-web at http://127.0.0.1:8765 (Linux, full incl. CPU-temp curves)
  * - DirectDevice:  wraps HidCooler (WebHID+USB, Win/Mac/Linux) or GattCooler (WebBLE, Win/Mac)
- * - DemoDevice:    simulated cooler, no hardware (UI exploration anywhere)
  *
- * All three expose the same snapshot()/action API shaped like GET /api/status
+ * All expose the same snapshot()/action API shaped like GET /api/status
  * from src/bs3/device_manager.py, so the dashboard renders identically.
- * Direct/demo snapshots run locally: cpu_temp is null (browsers expose no CPU
+ * Direct snapshots run locally: cpu_temp is null (browsers expose no CPU
  * temp API — temp-curve automation stays with the Python backend).
  */
 
@@ -258,82 +257,7 @@ class DirectDevice {
   }
 }
 
-// ------------------------------------------------------------------ demo ----
-class DemoDevice {
-  constructor() {
-    this.kind = "demo";
-    this.current = 0;
-    this.target = 1700;
-    this.gearIdx = 0;
-    this.realtime = false;
-    this.gears = [1700, 2400, 3000, 3700];
-    this.supply = 3;
-    this.light = { strip: true, gear_led: true, effect: 0, color: [104, 211, 145], brightness: 70 };
-    this.curve = loadCurve();
-    this.history = [];
-    this.seq = 0;
-    this.last = Date.now();
-  }
-
-  _ramp() {
-    const now = Date.now();
-    const dt = (now - this.last) / 1000;
-    this.last = now;
-    const step = 600 * dt;
-    if (this.current < this.target) this.current = Math.min(this.target, this.current + step);
-    else if (this.current > this.target) this.current = Math.max(this.target, this.current - step);
-  }
-
-  async snapshot() {
-    this._ramp();
-    this.seq = (this.seq + 1) & 0xffff;
-    const st = {
-      current_rpm: Math.floor(this.current / 100) * 100, target_rpm: this.target,
-      asleep: false, gear: P.GEAR_NAMES[this.gearIdx], effective_gear: P.GEAR_NAMES[this.gearIdx],
-      realtime: this.realtime, mode: this.realtime ? "realtime" : "gear",
-      supply: this.supply, supply_name: P.SUPPLY_NAMES[this.supply],
-      rpm_ceiling: P.SUPPLY_RPM_CEILING[this.supply],
-      ble_up: true, usb_up: false, demo: false,
-      standby: "delayed", autostart: true,
-      strip_on: this.light.strip, gear_led_on: this.light.gear_led,
-      ramp: 1, seq: this.seq,
-    };
-    this.history.push({ t: Date.now() / 1000, temp: null, rpm: st.current_rpm, target: st.target_rpm });
-    if (this.history.length > HISTORY_N) this.history.splice(0, this.history.length - HISTORY_N);
-    return {
-      demo: true, error: "demo mode: running without hardware",
-      coolers: [], model: "Demo BS3", has_strip: true, max_rpm: 4000,
-      fw: "0.0.2.4-demo", status: st, cpu_temp: null,
-      supply: this.supply, gears: [...this.gears], gear_names: [...P.GEAR_NAMES],
-      light: { ...this.light }, curve: this.curve.map((p) => [...p]),
-      auto_curve: false, history: [...this.history], effects: effectsList(),
-    };
-  }
-
-  async setRpm(rpm) { this.target = P.clampRpm(rpm, 3, "Demo BS3"); this.realtime = true; return { target_rpm: this.target }; }
-  async selectGear(name) {
-    const i = P.GEAR_NAMES.indexOf(name);
-    if (i < 0) throw new Error("unknown gear");
-    this.gearIdx = i; this.realtime = false; this.target = this.gears[i];
-    return { gear: name };
-  }
-  async release() { this.realtime = false; this.target = this.gears[this.gearIdx]; return { mode: "gear" }; }
-  async setStrip(on) { this.light.strip = !!on; return { strip: this.light.strip }; }
-  async setGearLed(on) { this.light.gear_led = !!on; return { gear_led: this.light.gear_led }; }
-  async setEffect(e) { if (!(e in R.EFFECT_NAMES)) throw new Error("effect 0..5"); this.light.effect = e; this.light.strip = true; return { effect: e }; }
-  async uploadColor(r, g, b, brightness) { this.light = { ...this.light, strip: true, effect: 0, color: [r, g, b], brightness }; return { ...this.light }; }
-  async setStandby(mode) { return { standby: mode }; }
-  async setCurve(points, _enabled) {
-    this.curve = points.map((p) => [Number(p[0]), Number(p[1])]);
-    saveCurve(this.curve);
-    return { curve: this.curve, auto_curve: false };
-  }
-  async setGearTable(t) { this.gears = [...t]; return { gears: this.gears }; }
-  async reconnect() { return { ok: true }; }
-  async close() { /* nothing */ }
-}
-
-const API = { BackendDevice, DirectDevice, DemoDevice, detectBackend, DEFAULT_CURVE, GEAR_INDEX, toSnakeStatus };
+const API = { BackendDevice, DirectDevice, detectBackend, DEFAULT_CURVE, GEAR_INDEX, toSnakeStatus };
 if (typeof module !== "undefined") {
   module.exports = API;
 } else if (typeof window !== "undefined") {

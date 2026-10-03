@@ -1,133 +1,129 @@
-"""Demo-mode manager tests: no hardware touched.
+"""Manager tests without hardware: no simulation, no demo mode.
 
-Patches find_coolers (this dev machine HAS a cooler on hidraw) and the
+Patches find_coolers (this dev machine may HAVE a cooler on hidraw) and the
 CPU sensor, and redirects the config file to tmp so the user's
 ~/.config/bs3-controller/config.json is never clobbered.
 """
 
-import os
-import tempfile
 import time
+
+import pytest
 
 from bs3 import device_manager as D
 from bs3 import hid_backend as H
+from bs3 import protocol as P
 from bs3 import sensors
 
 
-def _patched():
-    old_coolers = H.find_coolers
-    old_temp = sensors.cpu_temp
-    old_cfg = D.CONFIG_PATH
-    tmp = tempfile.NamedTemporaryFile(delete=False)
-    tmp.close()
-    H.find_coolers = lambda: []
-    sensors.cpu_temp = lambda: 60.0
-    D.CONFIG_PATH = tmp.name
-    return old_coolers, old_temp, old_cfg, tmp.name
+@pytest.fixture
+def isolated(tmp_path, monkeypatch):
+    monkeypatch.setattr(H, "find_coolers", lambda: [])
+    monkeypatch.setattr(sensors, "cpu_temp", lambda: 60.0)
+    monkeypatch.setattr(D, "CONFIG_PATH", str(tmp_path / "config.json"))
 
 
-def _restore(state):
-    old_coolers, old_temp, old_cfg, tmpname = state
-    H.find_coolers = old_coolers
-    sensors.cpu_temp = old_temp
-    D.CONFIG_PATH = old_cfg
-    try:
-        os.unlink(tmpname)
-    except OSError:
-        pass
-
-
-def test_demo_forced_and_auto_retry():
-    state = _patched()  # no hardware
-    try:
-        mgr = D.DeviceManager(demo=True)
-        try:
-            assert mgr.use_demo is True and mgr._demo_forced is True
-            time.sleep(1.2)  # loop ticks; forced demo must never probe
-            assert mgr.use_demo is True
-        finally:
-            mgr.stop()
-        mgr2 = D.DeviceManager()  # fallback demo: retries hardware rarely
-        try:
-            assert mgr2._demo_forced is False
-            mgr2._last_probe = 0.0  # retry due on next tick
-            time.sleep(1.2)
-            assert mgr2.use_demo is True  # still nothing there
-            assert mgr2._last_probe > 0.0  # ...but the retry fired
-        finally:
-            mgr2.stop()
-    finally:
-        _restore(state)
-
-
-def test_demo_snapshot_shape_and_actions():
-    state = _patched()
+def test_no_hardware_state(isolated):
     mgr = D.DeviceManager()
     try:
-        time.sleep(0.7)  # let the poll loop push one status
-        assert mgr.use_demo is True
+        time.sleep(1.0)  # poll loop ticks; connect keeps failing
+        assert mgr.connected is False
         s = mgr.snapshot()
-        for key in ("demo", "error", "coolers", "model", "fw", "status",
-                    "cpu_temp", "supply", "gears", "gear_names", "light",
-                    "curve", "auto_curve", "history", "effects",
-                    "max_rpm", "has_strip"):
-            assert key in s, key
-        assert s["demo"] is True and s["model"] == "Demo BS3"
-        assert s["max_rpm"] == 4000 and s["has_strip"] is True
-        assert s["status"] is not None and s["cpu_temp"] == 60.0
-
-        assert mgr.set_rpm(2600) == {"target_rpm": 2600}
-        assert mgr.select_gear("strong") == {"gear": "strong"}
-        try:
+        assert "demo" not in s  # no demo mode, ever
+        assert s["status"] is None
+        assert s["error"]  # truthful reason, not a simulation
+        assert s["history"] == []
+        assert s["cpu_temp"] == 60.0  # sensors stay live without a pad
+        assert s["model"] == "?"
+        for fn in (lambda: mgr.set_rpm(2600),
+                   lambda: mgr.select_gear("strong"),
+                   lambda: mgr.release(),
+                   lambda: mgr.set_strip(False),
+                   lambda: mgr.set_gear_led(False),
+                   lambda: mgr.set_standby("delayed"),
+                   lambda: mgr.set_gear_table([1700, 2400, 3000, 3700])):
+            with pytest.raises(RuntimeError, match="no cooler connected"):
+                fn()
+        with pytest.raises(ValueError):
             mgr.select_gear("turbo")
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("bad gear must raise")
-        assert mgr.release() == {"mode": "gear"}
-        assert mgr.set_strip(False) == {"strip": False}
-        assert mgr.set_gear_led(False) == {"gear_led": False}
-        assert mgr.set_effect(3) == {"effect": 3}
-        try:
+        with pytest.raises(ValueError):
             mgr.set_effect(9)
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("bad effect must raise")
-        assert mgr.upload_color(1, 2, 3, 50)["color"] == [1, 2, 3]
-        for bad in ({"r": 300}, {"brightness": 101}):
-            kw = {"r": 1, "g": 2, "b": 3, "brightness": 50}
-            kw.update(bad)
-            try:
-                mgr.upload_color(**kw)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"{bad} must raise")
-        assert mgr.set_standby("delayed") == {"standby": "delayed"}
-        try:
-            mgr.set_standby("warp")
-        except KeyError:
-            pass
-        else:
-            raise AssertionError("bad standby must raise")
+        # curve editing is config-only: works with no link
         assert mgr.set_curve([[35, 1000], [55, 2000]], True)["auto_curve"] is True
-        for bad in ([[35, 1000]], [[50, 1], [50, 2]]):
-            try:
-                mgr.set_curve(bad, False)
-            except ValueError:
-                pass
-            else:
-                raise AssertionError(f"{bad} must raise")
-        assert mgr.set_gear_table([1700, 2400, 3000, 3700])["gears"] == [1700, 2400, 3000, 3700]
-        try:
-            mgr.set_gear_table([1, 2, 3])
-        except ValueError:
-            pass
-        else:
-            raise AssertionError("short gear table must raise")
-        mgr.reconnect()  # still no hardware -> stays demo
-        assert mgr.snapshot()["demo"] is True
+        with pytest.raises(ValueError):
+            mgr.set_curve([[35, 1000]], False)
+        mgr.reconnect()  # still no hardware -> stays unconnected
+        assert mgr.snapshot()["status"] is None
     finally:
         mgr.stop()
-        _restore(state)
+
+
+class FakeHidCooler:
+    """Stub hidraw cooler: canned answers, records writes."""
+
+    def __init__(self, node, transport="bluetooth"):
+        self.node = node
+        self.transport = transport
+        self.model = "BS3"
+        self.calls = []
+
+    def open(self):
+        pass
+
+    def close(self):
+        pass
+
+    def fw_version(self):
+        return "0.0.2.4"
+
+    def gear_table(self):
+        return [1700, 2400, 2900, 4000]
+
+    def supply_level(self):
+        return 3
+
+    def transact(self, cmd, payload=b"", timeout=1.0):
+        self.calls.append((cmd, bytes(payload)))
+        return bytes((0x01, 0x5A, 0xA5, cmd, 0x03, 0x01, 0x00))
+
+    def read_status_push(self, timeout=2.0):
+        return P.Status(current_rpm=1700, target_rpm=1700, asleep=False,
+                        gear="quiet", effective_gear="quiet", realtime=False,
+                        supply=3, supply_name="full", rpm_ceiling=4000,
+                        ble_up=True, usb_up=False, demo=False,
+                        standby="delayed", autostart=True,
+                        strip_on=True, gear_led_on=True, ramp=1, seq=7)
+
+    def set_realtime_rpm(self, rpm, supply=3, model=None):
+        self.calls.append(("realtime", rpm))
+        return rpm
+
+    def release_to_gear(self):
+        self.calls.append(("release",))
+
+    def select_gear(self, gear):
+        self.calls.append(("gear", gear))
+
+    def set_gear_rpm(self, idx0, rpm):
+        self.calls.append(("gear-rpm", idx0, rpm))
+
+
+def test_hardware_appearing_connects(isolated, monkeypatch):
+    monkeypatch.setattr(H, "find_coolers", lambda: [
+        {"node": "/dev/hidraw9", "bus": 5, "vid": 0x37D7, "pid": 0x1003,
+         "model": "BS3", "transport": "bluetooth"}])
+    monkeypatch.setattr(H, "HidCooler", FakeHidCooler)
+    mgr = D.DeviceManager()
+    try:
+        for _ in range(40):  # background connect + poll ticks
+            if mgr.connected and mgr.snapshot()["status"] is not None:
+                break
+            time.sleep(0.25)
+        assert mgr.connected is True
+        s = mgr.snapshot()
+        assert s["model"] == "BS3"
+        assert s["status"]["current_rpm"] == 1700
+        assert s["error"] is None
+        assert mgr.set_rpm(2600) == {"target_rpm": 2600}
+        assert mgr.release() == {"mode": "gear"}
+    finally:
+        mgr.stop()

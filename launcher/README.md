@@ -14,14 +14,14 @@ cd launcher && python3 -m http.server 8000
 
 Or deploy the whole `launcher/` dir to any static host.
 
-## Transports (one UI, four modes)
+## Transports (one UI, three ways in)
 
 | Button | Where | What |
 |---|---|---|
-| Local backend / demo | auto on load | `bs3-web` at `127.0.0.1:8765` when running (full control incl. CPU-temp curves), else demo cooler |
+| Local backend | auto on load | `bs3-web` at `127.0.0.1:8765` when running (full control incl. CPU-temp curves), else an honest idle state |
 | Connect USB (WebHID) | Win/Mac/Linux Chrome/Edge | full command set over the USB-C **data** cable; laptop-port power = supply 1 (2700 rpm cap, 2 gears) |
 | Connect BLE (WebBluetooth) | Win/Mac Chrome/Edge | full control over GATT FFF2/F1; pad stays wall-powered at supply 3. Unpair from the OS first (one BLE link). Linux Chrome: behind `chrome://flags #enable-web-bluetooth`, otherwise use USB/backend |
-| Demo | anywhere | simulated cooler, UI explorable with no hardware |
+| No hardware | anywhere | error banner, empty gauges, retry on Reconnect — no simulation |
 
 `?backend=http://host:port` overrides the backend probe. Same-origin
 `/api/status` is probed first so `bs3-web` can serve this page one day
@@ -54,7 +54,7 @@ protocol.js   frames/checksum/blocklist/0xEF decode/clamps/model caps (mirrors p
 rgb.js        strip header/static-colour frames/0x47 upload plan/presets (mirrors rgb.py)
 hid.js        WebHID transport + full high-level API (mirrors hid_backend.HidCooler)
 gatt.js       WebBluetooth GATT transport + same API (mirrors gatt_backend.GattCooler)
-device.js     BackendDevice / DirectDevice / DemoDevice facade, /api/status-shaped snapshots
+device.js     BackendDevice / DirectDevice facade, /api/status-shaped snapshots
 app.js        dashboard (poll 1s, gauge/history/curve editor, transport switch)
 index.html    full dashboard page
 hid-test.html low-level diagnostics (connect/listen/status/fw/supply/gears/spin/release + raw tap)

@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Demo mode deleted everywhere: no `DemoCooler`, no `--demo`, no simulated
+  dashboard. No hardware means an honest error state (status None, reason
+  string, actions refuse with "no cooler connected") with auto-retry, on
+  the backend and in the browser launcher alike
+
 - `launcher/`: full Keychron-Launcher-style browser dashboard (`index.html`
   + `app.js`) — one UI over backend (auto-detected `bs3-web`), WebHID USB,
   WebBluetooth GATT, and demo transports via the new `device.js` facade
