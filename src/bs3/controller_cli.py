@@ -47,6 +47,12 @@ def _open_hid(node: str | None) -> H.HidCooler:
     return dev
 
 
+def _require_strip(dev: H.HidCooler) -> None:
+    model = getattr(dev, "model", None)
+    if not P.modelHasStrip(model):
+        raise SystemExit(f"{model or 'this model'} has no side strip (gear LEDs only)")
+
+
 def cmd_list(_a) -> int:
     found = H.find_coolers()
     if not found:

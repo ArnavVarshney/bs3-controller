@@ -40,11 +40,21 @@ MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
         ".svg": "image/svg+xml"}
 
 
+def _cors(h: BaseHTTPRequestHandler):
+    # Localhost-only server (binds 127.0.0.1): allow the static launcher
+    # (GitHub Pages / python -m http.server on another port) to probe
+    # /api/* directly. Still loopback-only at the socket layer — no auth.
+    h.send_header("Access-Control-Allow-Origin", "*")
+    h.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+    h.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+
 def _send_json(h: BaseHTTPRequestHandler, obj, code: int = 200):
     body = json.dumps(obj).encode()
     h.send_response(code)
     h.send_header("Content-Type", "application/json")
     h.send_header("Content-Length", str(len(body)))
+    _cors(h)
     h.end_headers()
     h.wfile.write(body)
 
@@ -104,6 +114,12 @@ class Handler(BaseHTTPRequestHandler):
             return json.loads(self.rfile.read(n) or b"{}")
         except ValueError:
             return {}
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        _cors(self)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
 
     def do_GET(self):
         path = urlparse(self.path).path

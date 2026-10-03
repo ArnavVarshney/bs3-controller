@@ -294,8 +294,14 @@ class DeviceManager:
             self.save_config()
             return {"mode": "gear"}
 
+    def _require_strip_hw(self) -> None:
+        if not P.MODEL_HAS_STRIP.get(self.model_name(), True):
+            raise ValueError(f"{self.model_name()} has no side strip (gear LEDs only)")
+
     def set_strip(self, on: bool) -> dict:
         with self.lock:
+            if not self.use_demo:
+                self._require_strip_hw()
             self.light["strip"] = on
             if self.use_demo:
                 self.demo.strip = on
@@ -324,6 +330,8 @@ class DeviceManager:
         if effect not in R.EFFECT_NAMES:
             raise ValueError("effect 0..5")
         with self.lock:
+            if not self.use_demo:
+                self._require_strip_hw()
             self.light["effect"] = effect
             if not self.use_demo:
                 dev = self._hw()
@@ -342,6 +350,8 @@ class DeviceManager:
             raise ValueError("brightness 0..100")
         header, frames = R.static_color_frames((r, g, b), brightness)
         with self.lock:
+            if not self.use_demo:
+                self._require_strip_hw()
             self.light.update({"color": [r, g, b], "brightness": brightness,
                                "strip": True, "effect": 0})
             if not self.use_demo:
