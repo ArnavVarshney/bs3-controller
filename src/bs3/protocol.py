@@ -1,7 +1,8 @@
 """Flydigi BS-series HID protocol.
 
-Reference: ElXreno/flydigictl docs/FIRMWARE.md (firmware reverse of
-CH591_For_BS3PRO_Ver0.0.2.4) + docs/PROTOCOL.md. Command codes originally
+Reference: ElXreno/flydigictl FIRMWARE.md (firmware reverse of
+CH591_For_BS3PRO_Ver0.0.2.4) + PROTOCOL.md
+(https://github.com/ElXreno/flydigictl). Command codes originally
 from TIANLI0/THRM (MIT).
 
 Wire format (both directions, 25-byte HID report):

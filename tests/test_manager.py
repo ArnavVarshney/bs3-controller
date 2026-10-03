@@ -41,7 +41,7 @@ def test_no_hardware_state(isolated):
                    lambda: mgr.set_gear_led(False),
                    lambda: mgr.set_standby("delayed"),
                    lambda: mgr.set_gear_table([1700, 2400, 3000, 3700])):
-            with pytest.raises(RuntimeError, match="no cooler connected"):
+            with pytest.raises(RuntimeError, match="No cooler connected"):
                 fn()
         with pytest.raises(ValueError):
             mgr.select_gear("turbo")

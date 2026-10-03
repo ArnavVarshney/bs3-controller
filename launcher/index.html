@@ -3,30 +3,34 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-<title>BS3 Cooler Control — browser launcher</title>
-<link rel="stylesheet" href="./style.css?v=0.5">
+<meta name="description" content="BS3 Controller — local control for Flydigi BS3 / BS3 Pro cooling pads. No account, no cloud.">
+<meta name="theme-color" content="#14171d">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2314171d'/%3E%3Cg fill='%236fd3ff'%3E%3Cellipse cx='32' cy='20' rx='8' ry='13'/%3E%3Cellipse cx='32' cy='20' rx='8' ry='13' transform='rotate(120 32 32)'/%3E%3Cellipse cx='32' cy='20' rx='8' ry='13' transform='rotate(240 32 32)'/%3E%3C/g%3E%3Ccircle cx='32' cy='32' r='6.5' fill='%2314171d'/%3E%3Ccircle cx='32' cy='32' r='6.5' fill='none' stroke='%236fd3ff' stroke-width='3'/%3E%3C/svg%3E">
+<title>BS3 Controller</title>
+<link rel="stylesheet" href="./style.css?v=0.6">
 <style>
 .transport { display: flex; gap: 6px; align-items: center; flex-wrap: wrap;
   padding: 10px 16px; border-bottom: 1px solid var(--line); background: #171c25; }
 .transport button { font-size: 12px; }
 .transport .sep { color: var(--mut); }
+.connLbl { font-size: 12px; color: var(--mut); text-transform: uppercase; letter-spacing: .06em; }
 #transportNote { font-size: 12px; color: var(--mut); }
 .badge.info { background: #1a2f45; color: var(--acc); border: 1px solid var(--acc); }
 </style>
 </head>
 <body>
 <header class="top">
-  <div class="brand"><span class="fan" id="fanIcon">❄</span> BS3 Cooler Control</div>
-  <div class="conn"><span id="dot" class="dot"></span><span id="model">…</span><span id="transportBadge" class="badge info">starting…</span></div>
+  <div class="brand"><svg class="fan" id="fanIcon" width="18" height="18" viewBox="0 0 24 24" aria-hidden="true"><g fill="#6fd3ff"><ellipse cx="12" cy="7.6" rx="3.1" ry="4.9"/><ellipse cx="12" cy="7.6" rx="3.1" ry="4.9" transform="rotate(120 12 12)"/><ellipse cx="12" cy="7.6" rx="3.1" ry="4.9" transform="rotate(240 12 12)"/></g><circle cx="12" cy="12" r="2.5" fill="#14171d"/><circle cx="12" cy="12" r="2.5" fill="none" stroke="#6fd3ff" stroke-width="1.3"/></svg> BS3 Controller</div>
+  <div class="conn"><span id="dot" class="dot"></span><span id="model">…</span><span id="transportBadge" class="badge info">Starting…</span></div>
 </header>
 <div class="transport">
-  <button id="btnBackend">Local backend</button>
-  <button id="btnUsb">Connect USB (WebHID)</button>
-  <button id="btnBle">Connect BLE (WebBluetooth)</button>
+  <span class="connLbl">Connection</span>
+  <button id="btnBackend" title="Probe the local BS3 backend app (127.0.0.1:8765)">Backend</button>
+  <button id="btnUsb" title="Connect directly over USB (Chrome/Edge)">USB</button>
+  <button id="btnBle" title="Connect directly over Bluetooth (Chrome/Edge)">Bluetooth</button>
   <button id="btnDisconnect" class="ghost">Disconnect</button>
   <span class="sep">·</span>
-  <span id="transportNote">probing local backend…</span>
+  <span id="transportNote">Looking for the BS3 backend…</span>
 </div>
 <div id="err" class="err" hidden></div>
 
@@ -94,12 +98,12 @@
   </section>
 </main>
 
-<footer class="muted">Runs entirely in your browser. No account, no cloud.</footer>
-<script src="./protocol.js?v=0.5"></script>
-<script src="./rgb.js?v=0.5"></script>
-<script src="./hid.js?v=0.5"></script>
-<script src="./gatt.js?v=0.5"></script>
-<script src="./device.js?v=0.5"></script>
-<script src="./app.js?v=0.5"></script>
+<footer class="muted">BS3 Controller v0.2.0 · Runs entirely in your browser. No account, no cloud.</footer>
+<script src="./protocol.js?v=0.6"></script>
+<script src="./rgb.js?v=0.6"></script>
+<script src="./hid.js?v=0.6"></script>
+<script src="./gatt.js?v=0.6"></script>
+<script src="./device.js?v=0.6"></script>
+<script src="./app.js?v=0.6"></script>
 </body>
 </html>

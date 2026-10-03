@@ -47,7 +47,7 @@ async function poll() {
     render(j);
     showErr(j.error || "");
   } catch (e) {
-    showErr("poll failed: " + e.message + " — is bs3-web running?");
+    showErr("Connection lost: " + e.message + " — is the BS3 backend running?");
     $("dot").className = "dot bad";
   }
 }
@@ -57,8 +57,11 @@ function render(s) {
   SNAP = s;
   const st = s.status;
   $("dot").className = "dot " + (!st ? "bad" : "ok");
+  if (!st) {
+    $("model").textContent = "No cooler";
+    return;
+  }
   $("model").textContent = (s.model || "?") + " · fw " + (s.fw || "?");
-  if (!st) return;
 
   // gauge
   const cur = st.current_rpm || 0;
@@ -109,7 +112,7 @@ function render(s) {
     if (document.activeElement !== $(id) && gears[i] != null) $(id).value = gears[i];
   });
   if (document.activeElement !== $("standby")) $("standby").value = st.standby;
-  if (![...$("standby").options].some((o) => o.value === st.standby) {
+  if (![...$("standby").options].some((o) => o.value === st.standby)) {
     // unknown firmware value (seen only as raw(N)): show it instead of a blank select
     const o = document.createElement("option");
     o.value = st.standby; o.textContent = "standby: " + st.standby;

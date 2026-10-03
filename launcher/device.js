@@ -234,7 +234,7 @@ class DirectDevice {
     // but automation itself stays backend-only.
     this.curve = points.map((p) => [Number(p[0]), Number(p[1])]);
     saveCurve(this.curve);
-    return { curve: this.curve, auto_curve: false, note: "temp automation needs the Python backend (no CPU-temp API in browsers)" };
+    return { curve: this.curve, auto_curve: false, note: "Temperature automation needs the BS3 backend app." };
   }
 
   async setGearTable(table) {

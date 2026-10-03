@@ -259,7 +259,9 @@ def _ensure_lhm(path: str | None) -> None:
 
 def main(argv=None) -> int:
     _setup_headless_log()
+    from . import __version__
     ap = argparse.ArgumentParser(prog="bs3-web", description="Local BS3 dashboard (localhost only)")
+    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--transport", choices=("hid", "ble"), default="hid",
                     help="hid=paired/USB hidraw via Linux (default), ble=BLE GATT via bleak (needs .[ble], works on Windows)")

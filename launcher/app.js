@@ -1,9 +1,9 @@
 "use strict";
 (function () {
-/* BS3 launcher dashboard: one UI, three transports (backend / USB-HID / BLE-GATT).
+/* BS3 Controller dashboard: one UI over backend / USB / Bluetooth.
  * Snapshot shape matches GET /api/status, so rendering is identical to bs3-web.
  * No bundler, no deps. Serve: cd launcher && python3 -m http.server 8000
- * then open http://127.0.0.1:8000/ (secure context: localhost qualifies for WebHID/BLE).
+ * then open http://127.0.0.1:8000/.
  */
 
 const $ = (id) => document.getElementById(id);
@@ -27,7 +27,7 @@ function unitMax() {
 
 let SNAP = null;
 let DEV = null;
-let TRANSPORT = "starting…";
+let TRANSPORT = "Starting…";
 let localCurve = DEFAULT_CURVE.map((p) => [...p]);
 let curveSeeded = false;
 let dragging = -1;
@@ -51,7 +51,7 @@ function setTransport(label, note) {
 }
 
 async function callAction(fn, ...args) {
-  if (!DEV) throw new Error("not connected");
+  if (!DEV) throw new Error("Not connected.");
   const out = await fn.apply(DEV, args);
   await pollSoon();
   return out;
@@ -88,7 +88,7 @@ async function useBackend() {
       if (DEV && DEV.close) { try { await DEV.close(); } catch (_) { /* noop */ } }
       DEV = new window.bs3device.BackendDevice(base);
       curveSeeded = fxBuilt = gearBuilt = false; dirty = false;
-      setTransport("backend", `local backend at ${base} — full control incl. temp curves`);
+      setTransport("Backend", `Connected to the backend at ${base} — temperature curves included.`);
       await poll();
       return true;
     }
@@ -111,25 +111,25 @@ async function disconnectDevice(note) {
   DEV = null;
   curveSeeded = fxBuilt = gearBuilt = false; dirty = false;
   SNAP = null;
-  setTransport("none", note || "not connected");
+  setTransport("None", note || "Not connected.");
   showErr(note || "");
   $("dot").className = "dot bad";
-  $("model").textContent = "no device";
+  $("model").textContent = "No cooler";
 }
 
 async function useUsb() {
   try {
     const cooler = await HidCooler.request();
     const dev = new window.bs3device.DirectDevice(cooler, "hid");
-    setTransport("usb…", "reading fw/supply/gears…");
+    setTransport("Connecting…", "Reading cooler settings…");
     await dev.init();
     if (DEV && DEV.close) { try { await DEV.close(); } catch (_) { /* noop */ } }
     DEV = dev;
     curveSeeded = fxBuilt = gearBuilt = false; dirty = false;
-    setTransport("usb", `${cooler.label} — direct browser control (wall PD keeps supply 3; laptop USB caps 2700)`);
+    setTransport("USB", `${cooler.label} — connected over USB.`);
     await poll();
   } catch (e) {
-    showErr("USB connect FAILED: " + e.message);
+    showErr("USB connection failed: " + e.message);
   }
 }
 
@@ -137,15 +137,15 @@ async function useBle() {
   try {
     const cooler = await GattCooler.request();
     const dev = new window.bs3device.DirectDevice(cooler, "gatt");
-    setTransport("ble…", "reading fw/supply/gears…");
+    setTransport("Connecting…", "Reading cooler settings…");
     await dev.init();
     if (DEV && DEV.close) { try { await DEV.close(); } catch (_) { /* noop */ } }
     DEV = dev;
     curveSeeded = fxBuilt = gearBuilt = false; dirty = false;
-    setTransport("ble", `${cooler.label} — direct browser control (Win/Mac Chrome; unpair from OS first)`);
+    setTransport("Bluetooth", `${cooler.label} — connected over Bluetooth.`);
     await poll();
   } catch (e) {
-    showErr("BLE connect FAILED: " + e.message);
+    showErr("Bluetooth connection failed: " + e.message);
   }
 }
 
@@ -154,8 +154,11 @@ function render(s) {
   SNAP = s;
   const st = s.status;
   $("dot").className = "dot " + (!st ? "bad" : "ok");
+  if (!st) {
+    $("model").textContent = "No cooler";
+    return;
+  }
   $("model").textContent = (s.model || "?") + " · fw " + (s.fw || "?");
-  if (!st) return;
 
   const cur = st.current_rpm || 0;
   const M = unitMax();
@@ -172,7 +175,7 @@ function render(s) {
   const c0 = (s.coolers && s.coolers[0]) || null;
   $("trans").textContent = c0 ? (c0.model + " " + c0.node + " " + c0.transport) : "";
   $("fanIcon").classList.toggle("spin", cur > 0);
-  $("curveNote").hidden = TRANSPORT === "backend";
+  $("curveNote").hidden = TRANSPORT === "Backend";
 
   if (!gearBuilt) { buildGearBtns(s.gear_names || ["quiet", "standard", "strong", "overclock"]); gearBuilt = true; }
   document.querySelectorAll("#gearBtns button").forEach((b) => {
@@ -181,8 +184,8 @@ function render(s) {
   if (document.activeElement !== $("rpm")) { $("rpm").value = st.target_rpm; $("rpmVal").textContent = st.target_rpm; }
   if (!$("curveOn").matches(":focus")) $("curveOn").checked = !!s.auto_curve;
   // Browser-direct has no CPU-temp automation: keep the toggle visible but inert.
-  $("curveOn").disabled = TRANSPORT !== "backend";
-  $("curveOn").title = TRANSPORT === "backend" ? "" : "temp automation needs the Python backend (no CPU-temp API in browsers)";
+  $("curveOn").disabled = TRANSPORT !== "Backend";
+  $("curveOn").title = TRANSPORT === "Backend" ? "" : "Temperature automation runs in the BS3 backend app.";
 
   $("stripOn").checked = !!s.light.strip;
   $("gearLedOn").checked = !!s.light.gear_led;
@@ -390,15 +393,15 @@ function markClean() {
 /* ---------- wire controls ---------- */
 function wire() {
   $("btnBackend").onclick = async () => {
-    setTransport("probing…", "checking for a local backend…");
+    setTransport("Connecting…", "Looking for the BS3 backend…");
     if (!(await useBackend())) {
-      disconnectDevice("no local backend found — start bs3-web, or connect USB/BLE for hardware");
+      disconnectDevice("No backend found. Start the BS3 backend app, or connect directly via USB or Bluetooth.");
     }
   };
   $("btnUsb").onclick = useUsb;
   $("btnBle").onclick = useBle;
   $("btnDisconnect").onclick = async () => {
-    await disconnectDevice("disconnected");
+    await disconnectDevice("Disconnected.");
   };
   $("rpm").oninput = () => { $("rpmVal").textContent = $("rpm").value; };
   $("btnRpm").onclick = async () => { try { await callAction(DEV.setRpm, Number($("rpm").value)); } catch (e) { showErr(e.message); } };
@@ -408,7 +411,7 @@ function wire() {
     catch (e) { showErr(e.message); }
   };
   $("btnCurveSave").onclick = async () => {
-    try { await callAction(DEV.setCurve, localCurve, true); $("curveOn").checked = TRANSPORT === "backend"; markClean(); }
+    try { await callAction(DEV.setCurve, localCurve, true); $("curveOn").checked = TRANSPORT === "Backend"; markClean(); }
     catch (e) { showErr(e.message); }
   };
   $("btnCurveReset").onclick = async () => {
@@ -438,10 +441,9 @@ function wire() {
 wire();
 drawCurve();
 (async () => {
-  // Auto: backend when bs3-web runs nearby, else an honest idle state.
-  // USB/BLE on demand.
+  // Auto-connect to the backend when it runs nearby; USB/Bluetooth on demand.
   await useBackend();
-  if (!DEV) disconnectDevice("no local backend — start bs3-web, or Connect USB/BLE");
+  if (!DEV) disconnectDevice("No backend found. Start the BS3 backend app, or connect directly via USB or Bluetooth.");
   setInterval(poll, 1000);
 })();
 })();

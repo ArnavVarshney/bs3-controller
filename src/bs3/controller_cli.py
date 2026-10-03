@@ -473,6 +473,8 @@ async def _ble_monitor(a) -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bs3ctl", description="Open-source Flydigi BS3 / BS3 Pro controller")
+    from . import __version__
+    p.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     p.add_argument("--node", default=None, help="/dev/hidrawN (default: auto, cable preferred)")
     p.add_argument("--transport", choices=("hid", "gatt", "ble"), default="hid", help="hid=paired/USB hidraw (default), gatt=BlueZ FFF2, ble=bleak FFF2 (needs .[ble], Windows-capable)")
     p.add_argument("--address", default="auto", help="BLE address for gatt transport")

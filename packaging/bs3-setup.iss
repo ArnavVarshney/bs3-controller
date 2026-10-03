@@ -16,7 +16,7 @@
 ;   under the admin install this package needs (Program Files + LHM driver).
 
 #ifndef AppVersion
-  #define AppVersion "0.1.0"
+  #define AppVersion "0.2.0"
 #endif
 
 [Setup]
@@ -24,6 +24,8 @@ AppName=BS3 Controller
 AppVersion={#AppVersion}
 AppPublisher=Arnav Varshney
 AppPublisherURL=https://github.com/ArnavVarshney/bs3-controller
+AppCopyright=Copyright (c) Arnav Varshney — MIT License
+VersionInfoDescription=BS3 Controller: local control for Flydigi BS3 / BS3 Pro coolers
 DefaultDirName={autopf}\BS3 Controller
 DefaultGroupName=BS3 Controller
 LicenseFile=..\LICENSE

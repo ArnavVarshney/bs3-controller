@@ -6,7 +6,7 @@ background poll thread: status @ ~2Hz (firmware 0xEF rate), CPU temp,
 auto-curve application, temp/RPM history ring.
 
 With no hardware attached the snapshot carries status None plus an error
-string, and every hardware action raises "no cooler connected" — no
+string, and every hardware action raises "No cooler connected." — no
 simulation, no demo mode. The poll thread keeps retrying so a pad that
 appears later (powered on / back in range) is picked up on its own.
 """
@@ -101,7 +101,7 @@ class DeviceManager:
         if not found:
             with self.lock:
                 self.connected = False
-                self.error = "no cooler on hidraw — pair Bluetooth or plug USB"
+                self.error = "No cooler found — pair it over Bluetooth or plug in USB, and make sure it's powered on."
             return
         pick = found[0]
         try:
@@ -138,14 +138,14 @@ class DeviceManager:
         except ImportError:
             with self.lock:
                 self.connected = False
-                self.error = "ble transport needs the ble extra: pip install -e .[ble]"
+                self.error = "The BLE transport needs the ble extra: pip install -e .[ble]"
             return
         try:
             addr = self.address
             if addr.lower() == "auto":
                 pads = self._run_ble(B.find_pads(), timeout=15.0)
                 if not pads:
-                    raise RuntimeError("no FlyDigi BS pad advertising (powered + unconnected?)")
+                    raise RuntimeError("No Flydigi pad advertising — is it powered on and not connected elsewhere?")
                 addr = pads[0]["address"]
             ctl = B.BleakCooler(addr)
             self._run_ble(ctl.connect(), timeout=20.0)
@@ -181,7 +181,7 @@ class DeviceManager:
         except Exception as e:
             with self.lock:
                 self.connected = False
-                self.error = f"ble {self.address}: {e}"
+                self.error = f"Bluetooth error ({self.address}): {e}"
 
     def reconnect(self):
         if self.transport == "ble":
@@ -243,14 +243,14 @@ class DeviceManager:
                 except (TimeoutError, OSError, RuntimeError, ValueError):
                     # ValueError: fd closed under us by reconnect()/stop()
                     with self.lock:
-                        self.error = "link lost — retrying"
+                        self.error = "Connection lost — retrying…"
                     time.sleep(2)
                     self._try_connect()
                     continue
                 except Exception:
                     # bleak radio errors (BleakError et al.) are plain Exceptions
                     with self.lock:
-                        self.error = "link lost — retrying"
+                        self.error = "Connection lost — retrying…"
                     time.sleep(2)
                     self._try_connect()
                     continue
@@ -286,55 +286,55 @@ class DeviceManager:
         """One command transaction on the live link (hid or ble)."""
         if self.transport == "ble":
             if self.ble is None:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             return self._run_ble(self.ble.transact(cmd, payload))
         dev = self._hw()
         if not dev:
-            raise RuntimeError("no cooler connected")
+            raise RuntimeError("No cooler connected.")
         return dev.transact(cmd, payload)
 
     def _set_rt(self, rpm: int) -> None:
         if self.transport == "ble":
             if self.ble is None:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._run_ble(self.ble.set_realtime_rpm(rpm, self.supply, self.model_name()))
             return
         dev = self._hw()
         if not dev:
-            raise RuntimeError("no cooler connected")
+            raise RuntimeError("No cooler connected.")
         dev.set_realtime_rpm(rpm, self.supply, self.model_name())
 
     def _release_hw(self) -> None:
         if self.transport == "ble":
             if self.ble is None:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._run_ble(self.ble.release_to_gear())
             return
         dev = self._hw()
         if not dev:
-            raise RuntimeError("no cooler connected")
+            raise RuntimeError("No cooler connected.")
         dev.release_to_gear()
 
     def _select_hw(self, gear1: int) -> None:
         if self.transport == "ble":
             if self.ble is None:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._run_ble(self.ble.select_gear(gear1))
             return
         dev = self._hw()
         if not dev:
-            raise RuntimeError("no cooler connected")
+            raise RuntimeError("No cooler connected.")
         dev.select_gear(gear1)
 
     def _set_gear_rpm_hw(self, idx0: int, rpm: int) -> None:
         if self.transport == "ble":
             if self.ble is None:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._run_ble(self.ble.set_gear_rpm(idx0, rpm))
             return
         dev = self._hw()
         if not dev:
-            raise RuntimeError("no cooler connected")
+            raise RuntimeError("No cooler connected.")
         dev.set_gear_rpm(idx0, rpm)
 
     def set_rpm(self, rpm: int) -> dict:
@@ -343,7 +343,7 @@ class DeviceManager:
             self.auto_curve = False
             self.curve._last_sent = None
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._set_rt(rpm)
             self.save_config()
             return {"target_rpm": rpm}
@@ -357,7 +357,7 @@ class DeviceManager:
             self.auto_curve = False
             self.curve._last_sent = None
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._select_hw(idx + 1)
             self.save_config()
             return {"gear": name}
@@ -367,7 +367,7 @@ class DeviceManager:
             self.auto_curve = False
             self.curve._last_sent = None
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._release_hw()
             self.save_config()
             return {"mode": "gear"}
@@ -380,7 +380,7 @@ class DeviceManager:
         with self.lock:
             self._require_strip_hw()
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._xact(P.CMD_STRIP_POWER, bytes((0x01 if on else 0x00,)))
             self.light["strip"] = on
             self.save_config()
@@ -389,7 +389,7 @@ class DeviceManager:
     def set_gear_led(self, on: bool) -> dict:
         with self.lock:
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._xact(P.CMD_GEAR_LED, bytes((0x01 if on else 0x00,)))
             self.light["gear_led"] = on
             self.save_config()
@@ -401,7 +401,7 @@ class DeviceManager:
         with self.lock:
             self._require_strip_hw()
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._xact(P.CMD_STRIP_POWER, b"\x01")
             self._xact(P.CMD_SELECT_EFFECT, bytes((effect,)))
             self.light["effect"] = effect
@@ -418,7 +418,7 @@ class DeviceManager:
         with self.lock:
             self._require_strip_hw()
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._xact(P.CMD_STRIP_POWER, b"\x01")
             for cmd, payload in R.upload_plan(header, frames):
                 self._xact(cmd, payload)
@@ -433,7 +433,7 @@ class DeviceManager:
         val = {"off": 0, "instant": 1, "delayed": 2}[mode]
         with self.lock:
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             self._xact(P.CMD_STANDBY, bytes((val,)))
             return {"standby": mode}
 
@@ -456,7 +456,7 @@ class DeviceManager:
             raise ValueError("4 gears, each 500..4000")
         with self.lock:
             if not self.connected:
-                raise RuntimeError("no cooler connected")
+                raise RuntimeError("No cooler connected.")
             for i, rpm in enumerate(table):
                 self._set_gear_rpm_hw(i, rpm)
             self.gears = list(table)

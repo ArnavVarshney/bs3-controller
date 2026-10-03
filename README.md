@@ -112,7 +112,7 @@ Settings persist to `~/.config/bs3-controller/config.json`.
 - Brave: WebBluetooth is disabled outright — use Edge/Chrome or set
   `brave://flags/#brave-web-bluetooth-api` → Enabled.
 
-Protocol details: `docs/FIRMWARE.md`, `docs/PROTOCOL.md`. Unsafe
+Protocol details: [ElXreno/flydigictl](https://github.com/ElXreno/flydigictl) (`FIRMWARE.md`, `PROTOCOL.md`). Unsafe
 commands are blocked in code and never sent.
 
 ## Layout
