@@ -32,9 +32,11 @@ Hard browser limits (not fixable in JS):
 ## Roadmap
 
 1. `protocol.js` + vector-parity tests (this dir) — DONE
-2. WebHID transport (`hid.js` + `hid-test.html`) — WRITTEN, needs a Chrome
-   smoke test against USB-cabled hardware (no browser on this box).
-   Serve: `cd launcher && python3 -m http.server 8000`, open
+2. WebHID transport (`hid.js` + `hid-test.html`) — VERIFIED 2026-10-03
+   against real USB-cabled hardware from Chrome: 0xEF decode, fw/supply/
+   gear-table queries, realtime override + release all ACK correctly.
+   (First run was silent: USB reads carry a leading byte, magic at 1 —
+   fixed.) Serve: `cd launcher && python3 -m http.server 8000`, open
    http://127.0.0.1:8000/hid-test.html, keep bs3-web STOPPED (one owner).
 3. WebBluetooth GATT transport (needs Win/Mac Chrome to test)
 4. UI transport switch: served UI talks to local `/api` when present,
