@@ -97,6 +97,8 @@ class DeviceManager:
         self.history: list[dict] = []
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
+        self._demo_forced = demo  # --demo: stay demo, never probe hardware
+        self._last_probe = 0.0  # last auto-retry in fallback demo mode
         self._load_config()
         if demo:
             with self.lock:
@@ -158,6 +160,7 @@ class DeviceManager:
                 self.supply = supply
                 self.use_demo = False
                 self.error = None
+                self.curve._last_sent = None  # fresh link: realtime never survives one
         except (OSError, TimeoutError) as e:
             with self.lock:
                 self.use_demo = True
@@ -170,7 +173,6 @@ class DeviceManager:
             except Exception:
                 pass
             self.dev = None
-        self.curve._last_sent = None
         self._try_connect()
 
     def model_name(self) -> str:
@@ -188,6 +190,13 @@ class DeviceManager:
             with self.lock:
                 self.cpu_temp = t
             if self.use_demo:
+                if not self._demo_forced:
+                    # fallback demo (not --demo): hardware may have appeared
+                    # (BT re-enumeration gives a new hidraw node); retry rarely.
+                    now = time.monotonic()
+                    if now - self._last_probe >= 10:
+                        self._last_probe = now
+                        self._try_connect()
                 with self.lock:
                     if self.auto_curve and t is not None:
                         want, changed = self.curve.update(t, self.demo.supply, "Demo BS3")

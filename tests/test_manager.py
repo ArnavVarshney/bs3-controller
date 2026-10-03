@@ -7,6 +7,7 @@ CPU sensor, and redirects the config file to tmp so the user's
 
 import os
 import tempfile
+import time
 
 from bs3 import device_manager as D
 from bs3 import hid_backend as H
@@ -36,11 +37,33 @@ def _restore(state):
         pass
 
 
+def test_demo_forced_and_auto_retry():
+    state = _patched()  # no hardware
+    try:
+        mgr = D.DeviceManager(demo=True)
+        try:
+            assert mgr.use_demo is True and mgr._demo_forced is True
+            time.sleep(1.2)  # loop ticks; forced demo must never probe
+            assert mgr.use_demo is True
+        finally:
+            mgr.stop()
+        mgr2 = D.DeviceManager()  # fallback demo: retries hardware rarely
+        try:
+            assert mgr2._demo_forced is False
+            mgr2._last_probe = 0.0  # retry due on next tick
+            time.sleep(1.2)
+            assert mgr2.use_demo is True  # still nothing there
+            assert mgr2._last_probe > 0.0  # ...but the retry fired
+        finally:
+            mgr2.stop()
+    finally:
+        _restore(state)
+
+
 def test_demo_snapshot_shape_and_actions():
     state = _patched()
     mgr = D.DeviceManager()
     try:
-        import time
         time.sleep(0.7)  # let the poll loop push one status
         assert mgr.use_demo is True
         s = mgr.snapshot()
