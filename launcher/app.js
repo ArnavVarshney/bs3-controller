@@ -78,9 +78,10 @@ async function pollSoon() {
 /* ---------- transport switching ---------- */
 async function useBackend() {
   for (const base of BACKENDS) {
-    if (base === location.origin && !base.includes("127.0.0.1") && location.protocol === "file:") continue;
+    // Same-origin gets one direct probe (no point double-fetching a 404);
+    // explicit/loopback backends go through the timed probe.
     const snap = base === location.origin
-      ? await window.bs3device.detectBackend(base).catch(() => null) || await trySameOrigin()
+      ? await trySameOrigin()
       : await window.bs3device.detectBackend(base);
     if (snap) {
       if (DEV && DEV.close) { try { await DEV.close(); } catch (_) { /* noop */ } }
