@@ -39,7 +39,7 @@ class HidCooler {
         this.debug({ dir: "rx-raw", n: this._rxRaw, reportId: e.reportId,
                      len: data.length, head: data.slice(0, 8).map((b) => b.toString(16).padStart(2, "0")).join(" ") });
       }
-      const frame = P.extractUsbFrame(data);
+      const frame = P.extractFrame(data);
       if (frame) this._queue.push(frame);
     };
   }

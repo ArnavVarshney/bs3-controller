@@ -42,11 +42,10 @@ ok("report lengths", () => {
   const f = P.extractFrame(rep);
   assert.ok(f && f[2] === 0x25);
   assert.strictEqual(P.extractFrame([0, 0, 0, 0, 0, 0]), null);
-  // USB/WebHID style: no report id, magic at offset 0 in a 32B read
-  const urep = P.buildUsbReport(0x25).concat(new Array(32 - 31).fill(0));
-  const uf = P.extractUsbFrame(urep.slice(0, 32));
+  // USB/WebHID reads carry a leading byte too (seen live: 0x03), magic at 1
+  const urep = [0x03, ...P.buildUsbReport(0x25), ...new Array(32 - 1 - 31).fill(0)];
+  const uf = P.extractFrame(urep.slice(0, 32));
   assert.ok(uf && uf[2] === 0x25);
-  assert.strictEqual(P.extractUsbFrame([0, 0, 0, 0, 0]), null);
 });
 
 ok("clamp rules", () => {

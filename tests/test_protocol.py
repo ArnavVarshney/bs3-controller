@@ -13,12 +13,11 @@ def test_checksum_known():
     assert f.hex() == "5aa52104280a57"
 
 
-def test_extract_usb_frame():
-    # USB/WebHID reads carry no report id: magic at offset 0
-    urep = P.build_usb_report(0x25) + bytes(1)  # 32B read
-    f = P.extract_usb_frame(urep)
-    assert f and f[2] == 0x25
-    assert P.extract_usb_frame(bytes(6)) is None
+def test_extract_frame_usb_leading_byte():
+    # live USB reads start with a leading byte (seen: 0x03), magic at 1 —
+    # same offset rule as BT, despite no report ids in the descriptor
+    urep = bytes((0x03,)) + P.build_usb_report(0x25)
+    assert P.extract_frame(urep[:32])[2] == 0x25
 
 
 def test_blocked_commands():
