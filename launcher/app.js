@@ -189,7 +189,6 @@ function render(s) {
   setText("chipFw", "standby " + st.standby + " · autostart " + (st.autostart ? "on" : "off"));
   const c0 = (s.coolers && s.coolers[0]) || null;
   setText("trans", c0 ? (c0.model + " " + c0.node + " " + c0.transport) : "");
-  $("fanIcon").classList.toggle("spin", cur > 0);
   $("curveNote").hidden = TRANSPORT === "Backend";
 
   if (!gearBuilt) { buildGearBtns(s.gear_names || ["quiet", "standard", "strong", "overclock"]); gearBuilt = true; }
