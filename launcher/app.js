@@ -237,7 +237,8 @@ function render(s) {
   if (dragging < 0) {
     // Rebuild the curve SVG only when the points moved (a full rebuild
     // every poll is the idle-CPU hog); drags paint live via pointermove.
-    const sig = JSON.stringify(localCurve);
+    // The axis ceiling rides along: a newly detected unit redraws once.
+    const sig = JSON.stringify(localCurve) + "|" + unitMax();
     if (sig !== drawnCurveSig) { drawCurve(); drawnCurveSig = sig; }
   }
   const hist = s.history || [];
@@ -297,9 +298,10 @@ function drawHist(h) {
 /* ---------- curve editor ---------- */
 const CV = { w: 400, h: 220, l: 36, r: 10, t: 10, b: 24, tMin: 20, tMax: 100 };
 const cx = (t) => CV.l + ((t - CV.tMin) / (CV.tMax - CV.tMin)) * (CV.w - CV.l - CV.r);
-const cy = (r) => CV.t + (1 - r / FALLBACK_MAX) * (CV.h - CV.t - CV.b);
+const cy = (r) => { const M = unitMax(); return CV.t + (1 - Math.min(r, M) / M) * (CV.h - CV.t - CV.b); };
 const invT = (x) => CV.tMin + ((x - CV.l) / (CV.w - CV.l - CV.r)) * (CV.tMax - CV.tMin);
-const invR = (y) => (1 - (y - CV.t) / (CV.h - CV.t - CV.b)) * FALLBACK_MAX;
+const invR = (y) => (1 - (y - CV.t) / (CV.h - CV.t - CV.b)) * unitMax();
+const fmtT = (t) => String(Number(Number(t).toFixed(1)));
 const NS = "http://www.w3.org/2000/svg";
 
 function drawCurve() {
@@ -311,11 +313,16 @@ function drawCurve() {
     svg.appendChild(e);
     return e;
   };
-  for (let r = 0; r <= 4000; r += 1000) {
+  // Y tops out at this unit's ceiling (BS3: 3400, Pro: 4000) — no dead zone.
+  const M = unitMax();
+  for (let r = 0; r < M; r += 1000) {
     mk("line", { x1: CV.l, x2: CV.w - CV.r, y1: cy(r), y2: cy(r), stroke: "#2a3040" });
     const t = mk("text", { x: 2, y: cy(r) + 4, fill: "#9aa3b2", "font-size": 10 });
     t.textContent = r;
   }
+  mk("line", { x1: CV.l, x2: CV.w - CV.r, y1: cy(M), y2: cy(M), stroke: "#3a4356" });
+  const mt = mk("text", { x: 2, y: cy(M) + 4, fill: "#9aa3b2", "font-size": 10 });
+  mt.textContent = M;
   for (let t = 20; t <= 100; t += 20) {
     const tx = mk("text", { x: cx(t) - 8, y: CV.h - 8, fill: "#9aa3b2", "font-size": 10 });
     tx.textContent = t + "°";
@@ -327,10 +334,17 @@ function drawCurve() {
   });
   pts.forEach((p) => {
     const c = mk("circle", { cx: cx(p[0]), cy: cy(p[1]), r: 7, fill: "#2b6cb0", stroke: "#6fd3ff", "stroke-width": 2, style: "cursor:grab" });
+    const tip = document.createElementNS(NS, "title");
+    tip.textContent = fmtT(p[0]) + "°C → " + p[1] + " rpm";
+    c.appendChild(tip);
     c.addEventListener("pointerdown", (e) => {
       dragRef = p;
       dragging = localCurve.indexOf(p);
       dragPoly = svg.querySelector("polyline");
+      dragTag.textContent = fmtT(p[0]) + "° / " + p[1] + " rpm";
+      dragTag.setAttribute("x", cx(p[0]));
+      dragTag.setAttribute("y", cy(p[1]) - 12);
+      dragTag.setAttribute("visibility", "visible");
       try { c.setPointerCapture(e.pointerId); } catch (_) { /* mouse: capture optional */ }
       e.preventDefault();
     });
@@ -342,6 +356,7 @@ function drawCurve() {
       drawCurve();
     });
   });
+  const dragTag = mk("text", { x: 0, y: 0, "text-anchor": "middle", fill: "#e6e9ef", "font-size": 11, stroke: "#14171d", "stroke-width": 3, style: "paint-order:stroke", visibility: "hidden" });
   const freeTemp = (t, skip) => {
     for (const q of localCurve) {
       if (q !== skip && Math.abs(q[0] - t) < 0.05) t = t >= q[0] ? t + 0.1 : t - 0.1;
@@ -353,7 +368,7 @@ function drawCurve() {
     const rect = svg.getBoundingClientRect();
     const sx = CV.w / rect.width, sy = CV.h / rect.height;
     const t = freeTemp(invT((e.clientX - rect.left) * sx), dragRef);
-    const r = Math.round(Math.min(FALLBACK_MAX, Math.max(0, invR((e.clientY - rect.top) * sy))) / 50) * 50;
+    const r = Math.round(Math.min(unitMax(), Math.max(0, invR((e.clientY - rect.top) * sy))) / 50) * 50;
     dragRef[0] = t; dragRef[1] = r;
     localCurve.sort((a, b) => a[0] - b[0]);
     const i = localCurve.indexOf(dragRef);
@@ -363,7 +378,15 @@ function drawCurve() {
     markDirty();
     const dots = svg.querySelectorAll("circle");
     if (dots.length !== localCurve.length) { drawCurve(); return; }
-    dots.forEach((d, k) => { d.setAttribute("cx", cx(localCurve[k][0])); d.setAttribute("cy", cy(localCurve[k][1])); });
+    dots.forEach((d, k) => {
+      d.setAttribute("cx", cx(localCurve[k][0]));
+      d.setAttribute("cy", cy(localCurve[k][1]));
+      const tip = d.querySelector("title");
+      if (tip) tip.textContent = fmtT(localCurve[k][0]) + "°C → " + localCurve[k][1] + " rpm";
+    });
+    dragTag.textContent = fmtT(dragRef[0]) + "° / " + dragRef[1] + " rpm";
+    dragTag.setAttribute("x", cx(dragRef[0]));
+    dragTag.setAttribute("y", cy(dragRef[1]) - 12);
     if (dragPoly) {
       dragPoly.setAttribute("points",
         localCurve.map((q) => cx(q[0]) + "," + cy(q[1])).join(" "));
@@ -381,7 +404,7 @@ function drawCurve() {
     const rect = svg.getBoundingClientRect();
     const np = [
       freeTemp(invT((e.clientX - rect.left) * (CV.w / rect.width)), null),
-      Math.round(Math.min(FALLBACK_MAX, Math.max(0, invR((e.clientY - rect.top) * (CV.h / rect.height)))) / 50) * 50,
+      Math.round(Math.min(unitMax(), Math.max(0, invR((e.clientY - rect.top) * (CV.h / rect.height)))) / 50) * 50,
     ];
     localCurve.push(np);
     localCurve.sort((a, b) => a[0] - b[0]);
