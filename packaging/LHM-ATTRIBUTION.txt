@@ -1,0 +1,19 @@
+LibreHardwareMonitor — bundled binary attribution
+====================================================
+
+The BS3 Controller Windows installer ships LibreHardwareMonitor
+(portable build) alongside bs3-web.exe so CPU-temperature fan curves work
+out of the box.
+
+- Upstream: https://github.com/LibreHardwareMonitor/LibreHardwareMonitor
+- License: Mozilla Public License 2.0 (MPL-2.0).
+  Full text: https://www.mozilla.org/en-US/MPL/2.0/
+  The exact bundled version is recorded in lhm/VERSION.txt at install time.
+- Source for the bundled build is available from the upstream releases page
+  above, per MPL-2.0 section 3.2.
+
+LibreHardwareMonitor is an independent work by its authors and is NOT
+covered by this repository's MIT license; the MIT license applies only to
+the bs3-controller code. No LHM source is modified or embedded — the
+unmodified upstream binaries are installed next to ours and communicate
+with bs3-web only through LHM's own WMI provider at runtime.

@@ -81,6 +81,15 @@ use the browser launcher for real hardware there instead of porting hidraw.
 
 ## Install
 
+Windows (installer — backend, CLI, LibreHardwareMonitor, shortcuts, optional
+autostart): download `bs3-controller-setup-<version>.exe` from
+[Releases](https://github.com/ArnavVarshney/bs3-controller/releases), run it,
+then Start Menu → **BS3 Backend** (keep the window open) and **BS3 Dashboard**.
+Tick the autostart boxes during setup for always-on temp control. On first
+run, start LibreHardwareMonitor once as admin so CPU temps flow.
+
+From source (Linux, all features):
+
 ```bash
 cd bs3-controller
 python3 -m venv .venv && source .venv/bin/activate
@@ -215,6 +224,7 @@ src/bs3/webapp.py         bs3-web entry: localhost dashboard + JSON API
 src/bs3/web/              dashboard UI (index.html, style.css, app.js)
 tests/                    pytest suite (protocol, curve, rgb, manager-demo, webapp HTTP, bleak-backend fake-GATT)
 launcher/                 browser launcher (protocol.js/rgb.js/hid.js/gatt.js/device.js/app.js + index.html, parity tests)
+packaging/                Windows installer (PyInstaller spec/shims, LHM fetch + attribution, Inno Setup iss, build README)
 udev/                     hidraw permission rule
 ```
 

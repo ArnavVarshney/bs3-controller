@@ -1,0 +1,34 @@
+name: release
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .[ble]
+      - run: pip install pyinstaller
+      - run: pyinstaller packaging\bs3-web.spec --noconfirm
+      - name: Stage LibreHardwareMonitor
+        run: powershell -File packaging/fetch-lhm.ps1
+      - name: Compile installer
+        run: |
+          choco install innosetup --no-progress -y
+          $tag = "${{ github.ref_name }}".TrimStart("v")
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\bs3-setup.iss /DAppVersion=$tag
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bs3-controller-setup-*.exe
+            dist/bs3-web.exe
+            dist/bs3ctl.exe
+          generate_release_notes: true

@@ -28,13 +28,23 @@ import argparse
 import functools
 import json
 import os
+import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
 from .device_manager import DeviceManager
 
-WEB_DIR = os.path.join(os.path.dirname(__file__), "web")
+
+def _web_dir() -> str:
+    # Frozen (PyInstaller): static files ride in the bundle; sys._MEIPASS is
+    # the unpack dir. Source runs use the package directory.
+    if getattr(sys, "frozen", False):
+        return os.path.join(sys._MEIPASS, "bs3", "web")  # type: ignore[attr-defined]
+    return os.path.join(os.path.dirname(__file__), "web")
+
+
+WEB_DIR = _web_dir()
 MIME = {".html": "text/html; charset=utf-8", ".css": "text/css; charset=utf-8",
         ".js": "text/javascript; charset=utf-8", ".json": "application/json",
         ".svg": "image/svg+xml"}

@@ -51,6 +51,12 @@
 - `tests/test_bleak_backend.py`: 5 hermetic tests against a fake GATT
   client (discovery filter, transact skip logic, status decode, write
   order + clamp); CI installs `[dev,ble]`
+- Windows installer: PyInstaller one-file `bs3-web.exe`/`bs3ctl.exe`
+  (dashboard static files bundled, frozen `WEB_DIR`), Inno Setup package
+  with LibreHardwareMonitor portable staged in (unmodified, MPL-2.0 —
+  `packaging/LHM-ATTRIBUTION.txt`), shortcuts, opt-in logon autostart;
+  `packaging/` holds spec/shims/fetch script/iss + build README;
+  tag-triggered `release.yml` builds and publishes installer + exes
 
 ## 0.1.0 — 2026-10-03
 
