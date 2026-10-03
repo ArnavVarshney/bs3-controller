@@ -13,9 +13,10 @@ const FALLBACK_MAX = 4000;
 const BACKENDS = (() => {
   const q = new URLSearchParams(location.search).get("backend");
   const list = [];
-  // Same-origin first (lets bs3-web serve this page one day without CORS).
-  if (location.protocol.startsWith("http")) list.push(location.origin);
   if (q) list.push(q.replace(/\/$/, ""));
+  // Same-origin only where bs3-web could plausibly serve this page
+  // (localhost dev). On a public host it just 404s noisily — skip it.
+  if (["localhost", "127.0.0.1", "[::1]"].includes(location.hostname)) list.push(location.origin);
   if (!list.includes("http://127.0.0.1:8765")) list.push("http://127.0.0.1:8765");
   return list;
 })();
