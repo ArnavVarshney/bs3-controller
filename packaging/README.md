@@ -28,6 +28,19 @@ iscc packaging\bs3-setup.iss                    # -> dist\bs3-controller-setup-0
 Win10/11 — the `.NET.x` zips need that runtime) and records the version in
 `stage/lhm/VERSION.txt`.
 
+## Startup model (why three mechanisms)
+
+- Backend autostart (Run key, silent `bs3-webw.exe --transport ble --lhm`):
+  no window, file logging, single-instance guarded.
+- LHM elevation (scheduled task `\BS3 Controller\LibreHardwareMonitor`,
+  logon trigger, highest privileges): LHM's manifest *requires* admin
+  (Error 740 otherwise), and a non-elevated backend can never elevate it
+  silently — so the elevated installer creates this task once (consent at
+  install), and it runs elevated at every login with no prompt. The
+  backend's `--lhm` is best-effort fallback only.
+- The installer offers all of these as opt-in tasks; uninstall removes the
+  Run values and deletes the scheduled task.
+
 ## Releases
 
 Push a tag (`git tag v0.2.0; git push origin v0.2.0`) — `.github/workflows/release.yml`
