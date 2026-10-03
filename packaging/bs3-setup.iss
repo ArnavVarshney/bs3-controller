@@ -53,10 +53,30 @@ Name: "{group}\Uninstall BS3 Controller"; Filename: "{uninstallexe}"
 Name: "backend_autostart"; Description: "Start the BS3 backend silently when I log in (no window; recommended)"; GroupDescription: "Startup:"; Flags: exclusive
 Name: "backend_console_autostart"; Description: "Start the BS3 backend with a visible window when I log in"; GroupDescription: "Startup:"; Flags: exclusive unchecked
 Name: "no_autostart"; Description: "Do not start anything at login"; GroupDescription: "Startup:"; Flags: exclusive unchecked
+Name: "lhm_elevated"; Description: "Run LibreHardwareMonitor elevated at login (required for CPU temps; consent once, silent after)"; Flags: checkedonce
 
 [Registry]
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BS3Web"; ValueData: """{app}\bs3-webw.exe"" --transport ble --lhm"; Tasks: backend_autostart; Flags: uninsdeletevalue
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BS3Web"; ValueData: """{app}\bs3-web.exe"" --transport ble --lhm"; Tasks: backend_console_autostart; Flags: uninsdeletevalue
 
 [Run]
-Filename: "{app}\lhm\LibreHardwareMonitor.exe"; Description: "Run LibreHardwareMonitor now (once as admin enables CPU temps)"; Flags: postinstall skipifsilent runascurrentuser
+Filename: "{app}\lhm\LibreHardwareMonitor.exe"; Description: "Run LibreHardwareMonitor now (elevated: enables CPU temps)"; Flags: postinstall skipifsilent runascurrentuser
+
+[UninstallRun]
+Filename: "schtasks.exe"; Parameters: "/delete /tn ""BS3 Controller\LibreHardwareMonitor"" /f"; RunOnceId: "DelLhmTask"; Flags: runhidden
+
+[Code]
+procedure CurStepChanged(CurStepID: TSetupStep);
+var
+  ResultCode: Integer;
+begin
+  { Elevated logon task for LHM: silent UAC (consent given to this admin
+    installer once), runs elevated at every login. The backend can never
+    elevate LHM itself (Error 740), so this task owns the lifecycle. }
+  if (CurStepID = ssPostInstall) and WizardIsTaskSelected('lhm_elevated') then
+    Exec('schtasks.exe',
+      '/create /tn "BS3 Controller\LibreHardwareMonitor" /tr "' +
+        ExpandConstant('{app}\lhm\LibreHardwareMonitor.exe') +
+        '" /sc onlogon /rl highest /f',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;

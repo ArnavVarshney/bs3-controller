@@ -249,7 +249,12 @@ def _ensure_lhm(path: str | None) -> None:
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print(f"lhm: started {exe} minimized", flush=True)
     except (OSError, subprocess.SubprocessError) as e:
-        print(f"lhm: could not start ({e})", flush=True)
+        msg = str(e)
+        if "740" in msg or "elevation" in msg.lower():
+            print("lhm: needs one elevated start (right-click LibreHardwareMonitor -> "
+                  "Run as administrator); the installer can schedule that", flush=True)
+        else:
+            print(f"lhm: could not start ({e})", flush=True)
 
 
 def main(argv=None) -> int:
