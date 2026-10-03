@@ -45,8 +45,9 @@
 - `bs3-web --transport ble [--address …]` / `bs3ctl --transport ble`:
   same dashboard + JSON API + CLI on Windows, no browser needed
   (`DeviceManager` drives bleak on its own event-loop thread)
-- `sensors.py`: Windows WMI thermal-zone fallback (no new dependency;
-  coarse but real — curve automation degrades gracefully to inert without it)
+- `sensors.py`: Windows temp via LibreHardwareMonitor's WMI provider
+  (preferred; zero new deps — CIM over powershell, 4s cache) with MSAcpi
+  thermal-zone fallback; inert when neither exists
 - `tests/test_bleak_backend.py`: 5 hermetic tests against a fake GATT
   client (discovery filter, transact skip logic, status decode, write
   order + clamp); CI installs `[dev,ble]`

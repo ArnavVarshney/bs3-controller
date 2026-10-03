@@ -38,27 +38,99 @@ def read_hwmon_temps() -> list[tuple[str, str, float]]:
     return out
 
 
+def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[dict]:
+    """Query a WMI namespace via powershell (Windows only, zero new deps).
+
+    Returns row dicts (JSON round-trip). Anything failing -> [].
+    """
+    import json
+    import subprocess
+
+    if os.name != "nt":
+        return []
+    ps = ("Get-CimInstance -Namespace " + namespace + " -ClassName " + classname +
+          " -ErrorAction SilentlyContinue | ConvertTo-Json -Compress -Depth 2")
+    try:
+        out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                             capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    txt = (out.stdout or "").strip()
+    if not txt:
+        return []
+    try:
+        data = json.loads(txt)
+    except ValueError:
+        return []
+    if isinstance(data, dict):
+        return [data]
+    return [r for r in data if isinstance(r, dict)]
+
+
+_CIM_TTL_S = 4.0  # powershell spawn is ~300ms; don't pay it every poll tick
+_win_cache: dict = {"at": 0.0, "value": None}
+
+
+def _librehardwaremonitor_temp() -> float | None:
+    """CPU temp from LibreHardwareMonitor's WMI provider (run LHM portable,
+    admin, once — namespace root\\LibreHardwareMonitor appears while it runs).
+    Prefers CPU Package/Tctl/Tdie, else the hottest CPU-parent sensor."""
+    rows = _cim_query(r"root\LibreHardwareMonitor", "Sensor")
+    cands = []
+    for r in rows:
+        if str(r.get("SensorType", "")) != "Temperature":
+            continue
+        try:
+            v = float(r.get("Value"))
+        except (TypeError, ValueError):
+            continue
+        if not 0 < v < 150:
+            continue
+        parent = str(r.get("Parent", ""))
+        name = str(r.get("Name", ""))
+        if "cpu" not in parent.lower() and "cpu" not in name.lower():
+            continue
+        cands.append((name, parent, v))
+    if not cands:
+        return None
+    for want in ("CPU Package", "Tctl", "Tdie", "CPU Core Max"):
+        for name, _, v in cands:
+            if name == want:
+                return v
+    return max(v for _, _, v in cands)
+
+
 def _wmi_thermal_temp() -> float | None:
     """Windows fallback: MSAcpi_ThermalZoneTemperature (tenths of Kelvin).
 
-    Needs a `wmi` package (`pip install wmi`, Windows only) and is coarse
-    next to hwmon, but it is a real sensor reading — enough for the fan
-    curve where nothing else exists. Absent/unreadable -> None.
+    Often absent (this machine has none) — LibreHardwareMonitor above is the
+    reliable source. Absent/unreadable -> None.
     """
-    try:
-        import wmi  # type: ignore
-    except ImportError:
-        return None
-    try:
-        c = wmi.WMI(namespace=r"root\wmi")
-        temps = []
-        for z in c.MSAcpi_ThermalZoneTemperature():
-            t = (int(z.CurrentTemperature) - 2732) / 10.0
-            if 0 < t < 150:
-                temps.append(t)
-        return max(temps) if temps else None
-    except Exception:
-        return None
+    rows = _cim_query(r"root\wmi", "MSAcpi_ThermalZoneTemperature")
+    temps = []
+    for r in rows:
+        try:
+            t = (int(r.get("CurrentTemperature")) - 2732) / 10.0
+        except (TypeError, ValueError):
+            continue
+        if 0 < t < 150:
+            temps.append(t)
+    return max(temps) if temps else None
+
+
+def _windows_temp() -> float | None:
+    """Best-effort Windows CPU temp, cached for _CIM_TTL_S (spawning
+    powershell every 0.5s poll tick would be absurd)."""
+    import time
+
+    now = time.monotonic()
+    if now - _win_cache["at"] < _CIM_TTL_S:
+        return _win_cache["value"]
+    v = _librehardwaremonitor_temp()
+    if v is None:
+        v = _wmi_thermal_temp()
+    _win_cache["at"], _win_cache["value"] = now, v
+    return v
 
 
 def cpu_temp() -> float:
@@ -74,9 +146,10 @@ def cpu_temp() -> float:
             except (OSError, ValueError):
                 pass
         if not zones:
-            wmi_t = _wmi_thermal_temp()
-            if wmi_t is not None:
-                return wmi_t
+            if os.name == "nt":
+                wmi_t = _windows_temp()
+                if wmi_t is not None:
+                    return wmi_t
             raise RuntimeError("no temperature sensors found under /sys/class/hwmon")
         return max(zones)
     for chip, label, t in temps:

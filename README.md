@@ -69,9 +69,10 @@ Two control planes, pick either (or both):
 - **Python backend on Windows (new, via bleak)** — `bs3-web --transport ble`
   / `bs3ctl --transport ble` talk GATT FFF2/F1 through bleak's WinRT backend
   (`pip install -e .[ble]`), so the same dashboard + JSON API works on
-  Windows with no browser involved. CPU temp falls back to the WMI thermal
-  zone where present (coarse, needs no extra package beyond optional `wmi`);
-  with no sensor and no temp source the curve stays inert, same as demo.
+  Windows with no browser involved. CPU temp falls back to
+  LibreHardwareMonitor's WMI provider while it runs (portable .zip, run as
+  admin — namespace `root\LibreHardwareMonitor`), then to the WMI thermal
+  zone where present; with no source the curve stays inert, same as demo.
 
 What *is* portable in Python (pure, no OS calls): protocol framing,
 fan-curve logic, RGB builders, dashboard UI. On non-Linux the tools import
