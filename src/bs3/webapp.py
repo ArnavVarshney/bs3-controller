@@ -193,8 +193,11 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="bs3-web", description="Local BS3 dashboard (localhost only)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--demo", action="store_true", help="demo mode: explore the UI without hardware (no hidraw access)")
+    ap.add_argument("--transport", choices=("hid", "ble"), default="hid",
+                    help="hid=paired/USB hidraw via Linux (default), ble=BLE GATT via bleak (needs .[ble], works on Windows)")
+    ap.add_argument("--address", default="auto", help="BLE address for --transport ble (default: first FlyDigi BS found)")
     a = ap.parse_args(argv)
-    mgr = DeviceManager(demo=a.demo)
+    mgr = DeviceManager(demo=a.demo, transport=a.transport, address=a.address)
     Handler.mgr = mgr
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     print(f"bs3-web on http://127.0.0.1:{a.port}  (Ctrl-C stops, localhost only — no auth)")

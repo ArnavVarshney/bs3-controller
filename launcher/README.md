@@ -25,7 +25,9 @@ Or deploy the whole `launcher/` dir to any static host.
 
 `?backend=http://host:port` overrides the backend probe. Same-origin
 `/api/status` is probed first so `bs3-web` can serve this page one day
-without CORS.
+without CORS. The backend itself can be BLE-based too
+(`bs3-web --transport ble` on Windows) — the page doesn't care, it just
+speaks `/api`.
 
 ## What the browser can and cannot do
 

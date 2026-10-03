@@ -39,6 +39,17 @@
   reads (fw, supply, gear table, `0xEF` status) plus full transient write
   path — `0x23` + `0x21` realtime 2000 confirmed on `0xEF`, `0x24` release,
   `0x08` gear select confirmed; pad left in gear/quiet as found
+- `src/bs3/bleak_backend.py` (new, `.[ble]` extra): cross-platform BLE GATT
+  transport (WinRT on Windows) — name-filtered discovery, reply-matching
+  transact, `0xEF` decode, full fan-control parity with `hid_backend`
+- `bs3-web --transport ble [--address …]` / `bs3ctl --transport ble`:
+  same dashboard + JSON API + CLI on Windows, no browser needed
+  (`DeviceManager` drives bleak on its own event-loop thread)
+- `sensors.py`: Windows WMI thermal-zone fallback (no new dependency;
+  coarse but real — curve automation degrades gracefully to inert without it)
+- `tests/test_bleak_backend.py`: 5 hermetic tests against a fake GATT
+  client (discovery filter, transact skip logic, status decode, write
+  order + clamp); CI installs `[dev,ble]`
 
 ## 0.1.0 — 2026-10-03
 

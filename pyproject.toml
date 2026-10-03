@@ -20,6 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 gatt = ["dbus-next>=2.4"]  # only for --transport gatt (unpaired BLE via BlueZ)
+ble = ["bleak>=1.0"]  # for --transport ble (BLE GATT anywhere: Windows/macOS/Linux)
 dev = ["pytest"]
 
 [project.scripts]

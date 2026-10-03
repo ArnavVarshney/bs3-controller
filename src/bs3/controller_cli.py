@@ -53,7 +53,46 @@ def _require_strip(dev: H.HidCooler) -> None:
         raise SystemExit(f"{model or 'this model'} has no side strip (gear LEDs only)")
 
 
-def cmd_list(_a) -> int:
+def _with_ble(a, fn):
+    """Connect over BLE GATT, run async fn(ctl), close. Radio errors from
+    bleak surface as RuntimeError so the CLI's device-error path covers them."""
+    from . import bleak_backend as B
+    ctl = B.BleakCooler(a.address)
+
+    async def go():
+        await ctl.connect()
+        print(f"# {ctl.model} on {ctl.address} via ble", file=sys.stderr)
+        try:
+            return await fn(ctl)
+        finally:
+            await ctl.close()
+
+    try:
+        return asyncio.run(go())
+    except (OSError, TimeoutError, RuntimeError):
+        raise
+    except Exception as e:
+        raise RuntimeError(f"ble error: {e}") from e
+
+
+def _ble_list(a) -> int:
+    from . import bleak_backend as B
+
+    async def go():
+        return await B.find_pads()
+
+    pads = asyncio.run(go())
+    if not pads:
+        print("no FlyDigi BS pads advertising (powered + unconnected?)")
+        return 1
+    for p in pads:
+        print(f"{p['address']}  {p['model']}  ble  ({p['name']})")
+    return 0
+
+
+def cmd_list(a) -> int:
+    if a.transport == "ble":
+        return _ble_list(a)
     found = H.find_coolers()
     if not found:
         print("no Flydigi BS coolers on hidraw (VID 37D7, PIDs 1002/1003/1004)")
@@ -79,6 +118,20 @@ def _print_status(s: P.Status, fw: str = "?", gears: list[int] | None = None) ->
 
 
 def cmd_status(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            try:
+                fw = await ctl.fw_version()
+            except TimeoutError:
+                fw = "?"
+            try:
+                gears = await ctl.gear_table()
+            except TimeoutError:
+                gears = None
+            s = await ctl.read_status_push()
+            _print_status(s, fw, gears)
+            return 0
+        return _with_ble(a, go)
     if a.transport == "gatt":
         return asyncio.run(_gatt_status(a))
     with _open_hid(a.node) as dev:
@@ -110,6 +163,16 @@ async def _gatt_status(a) -> int:
 
 
 def cmd_gear(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            allowed = P.model_gears(ctl.model)
+            if a.gear not in allowed:
+                raise SystemExit(f"{ctl.model or 'cooler'} has {len(allowed)} gears: {', '.join(allowed)}")
+            await ctl.select_gear(GEARS[a.gear])
+            await asyncio.sleep(0.6)
+            print(f"gear: {a.gear}")
+            return 0
+        return _with_ble(a, go)
     with _open_hid(a.node) as dev:
         allowed = P.model_gears(getattr(dev, "model", None))
         if a.gear not in allowed:
@@ -121,6 +184,19 @@ def cmd_gear(a) -> int:
 
 
 def cmd_rpm(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            try:
+                supply = await ctl.supply_level()
+            except TimeoutError:
+                supply = 3
+            sent = await ctl.set_realtime_rpm(a.rpm, supply, ctl.model)
+            if sent != a.rpm:
+                print(f"target {a.rpm} clamped to {sent} (supply {supply}, stall-band/supply/model rules)")
+            else:
+                print(f"target {sent} rpm (realtime override; gear LEDs blink)")
+            return 0
+        return _with_ble(a, go)
     with _open_hid(a.node) as dev:
         try:
             supply = dev.supply_level()
@@ -135,6 +211,12 @@ def cmd_rpm(a) -> int:
 
 
 def cmd_auto(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            await ctl.release_to_gear()
+            print("released to gear mode")
+            return 0
+        return _with_ble(a, go)
     with _open_hid(a.node) as dev:
         dev.release_to_gear()
         print("released to gear mode")
@@ -142,6 +224,19 @@ def cmd_auto(a) -> int:
 
 
 def cmd_gears(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            table = await ctl.gear_table()
+            try:
+                supply = await ctl.supply_level()
+            except TimeoutError:
+                supply = 0
+            names = ("quiet", "standard", "strong", "overclock")
+            for i, (n, r) in enumerate(zip(names, table)):
+                allowed = "ok" if i < P.SUPPLY_MAX_GEAR.get(supply, 4) else "BLOCKED at this supply"
+                print(f"{n:10s} {r:5d} rpm  [{allowed}]")
+            return 0
+        return _with_ble(a, go)
     with _open_hid(a.node) as dev:
         table = dev.gear_table()
         try:
@@ -156,6 +251,12 @@ def cmd_gears(a) -> int:
 
 
 def cmd_set_gear_rpm(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            await ctl.set_gear_rpm(GEARS[a.gear] - 1, a.rpm)
+            print(f"{a.gear} stored at {a.rpm} rpm (persisted in cooler flash, switched to it)")
+            return 0
+        return _with_ble(a, go)
     idx = GEARS[a.gear] - 1
     with _open_hid(a.node) as dev:
         dev.set_gear_rpm(idx, a.rpm)
@@ -164,6 +265,13 @@ def cmd_set_gear_rpm(a) -> int:
 
 
 def cmd_rgb(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            _require_strip(ctl)
+            await ctl.transact(P.CMD_STRIP_POWER, bytes((0x01 if a.state == "on" else 0x00,)))
+            print(f"strip {a.state}")
+            return 0
+        return _with_ble(a, go)
     on = a.state == "on"
     with _open_hid(a.node) as dev:
         _require_strip(dev)
@@ -173,6 +281,14 @@ def cmd_rgb(a) -> int:
 
 
 def cmd_effect(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            _require_strip(ctl)
+            await ctl.transact(P.CMD_STRIP_POWER, b"\x01")
+            await ctl.transact(P.CMD_SELECT_EFFECT, bytes((a.effect,)))
+            print(f"effect {a.effect} ({R.EFFECT_NAMES[a.effect]}) — only renders in realtime mode; run `bs3ctl rpm <N>` first")
+            return 0
+        return _with_ble(a, go)
     if a.effect not in R.EFFECT_NAMES:
         raise SystemExit(f"effect 0..5: {R.EFFECT_NAMES}")
     with _open_hid(a.node) as dev:
@@ -187,6 +303,19 @@ def cmd_effect(a) -> int:
 
 
 def cmd_rgb_upload(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            _require_strip(ctl)
+            r, g, b = a.color
+            header, frames = R.static_color_frames((r, g, b), a.brightness)
+            await ctl.transact(P.CMD_STRIP_POWER, b"\x01")
+            for cmd, payload in R.upload_plan(header, frames):
+                await ctl.transact(cmd, payload)
+            await ctl.transact(P.CMD_LIGHT_COMMIT, b"\x01")
+            await ctl.transact(P.CMD_SELECT_EFFECT, b"\x00")
+            print(f"static rgb({r},{g},{b}) @ {a.brightness}% uploaded + playing (persists across power cuts)")
+            return 0
+        return _with_ble(a, go)
     r, g, b = a.color
     if any(not 0 <= c <= 255 for c in (r, g, b)):
         raise SystemExit("color 0..255")
@@ -205,6 +334,13 @@ def cmd_rgb_upload(a) -> int:
 
 
 def cmd_standby(a) -> int:
+    if a.transport == "ble":
+        async def go(ctl):
+            val = {"off": 0, "instant": 1, "delayed": 2}[a.mode]
+            await ctl.transact(P.CMD_STANDBY, bytes((val,)))
+            print(f"standby {a.mode} (stored in cooler; sleeps fan+lights when host goes away)")
+            return 0
+        return _with_ble(a, go)
     val = {"off": 0, "instant": 1, "delayed": 2}[a.mode]
     with _open_hid(a.node) as dev:
         dev.transact(P.CMD_STANDBY, bytes((val,)))
@@ -214,6 +350,8 @@ def cmd_standby(a) -> int:
 
 def cmd_monitor(a) -> int:
     """CPU-temp curve loop. Re-applies after reconnect (realtime never survives one)."""
+    if a.transport == "ble":
+        return asyncio.run(_ble_monitor(a))
     cv = C.Curve()
     print("# temp -> rpm curve active (Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
     dev = None
@@ -269,10 +407,70 @@ def cmd_monitor(a) -> int:
             dev.close()
 
 
+async def _ble_monitor(a) -> int:
+    """BLE variant of cmd_monitor: holds one GATT link, CPU-temp curve."""
+    from . import bleak_backend as B
+    cv = C.Curve()
+    print("# temp -> rpm curve active (Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
+    ctl: B.BleakCooler | None = None
+    try:
+        while True:
+            try:
+                t = sensors.cpu_temp()
+            except RuntimeError as e:
+                print(f"sensor error: {e}", file=sys.stderr)
+                await asyncio.sleep(5)
+                continue
+            if ctl is None:
+                ctl = B.BleakCooler(a.address)
+                try:
+                    await ctl.connect()
+                    print(f"# {ctl.model} on {ctl.address} via ble", file=sys.stderr)
+                except Exception as e:
+                    print(f"{e} -- retry in 5s", file=sys.stderr)
+                    ctl = None
+                    await asyncio.sleep(5)
+                    continue
+            try:
+                if not hasattr(ctl, "_supply"):
+                    try:
+                        ctl._supply = await ctl.supply_level()  # type: ignore[attr-defined]
+                    except TimeoutError:
+                        ctl._supply = 3
+                want, changed = cv.update(t, ctl._supply, ctl.model)
+                if changed:
+                    try:
+                        await ctl.set_realtime_rpm(want, ctl._supply, ctl.model)
+                    except (TimeoutError, OSError):
+                        print("link lost, will reconnect", file=sys.stderr)
+                        await ctl.close()
+                        ctl = None
+                        cv._last_sent = None
+                        await asyncio.sleep(3)
+                        continue
+                    print(f"{t:5.1f}C -> {want:4d} rpm  (supply {ctl._supply})")
+                await asyncio.sleep(a.interval)
+            except (TimeoutError, OSError):
+                print("link lost, will reconnect", file=sys.stderr)
+                try:
+                    await ctl.close()
+                except Exception:
+                    pass
+                ctl = None
+                cv._last_sent = None
+                await asyncio.sleep(3)
+    except KeyboardInterrupt:
+        print("\nstopped (cooler holds last rpm; run `bs3ctl auto` to release)")
+        return 0
+    finally:
+        if ctl:
+            await ctl.close()
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="bs3ctl", description="Open-source Flydigi BS3 / BS3 Pro controller")
     p.add_argument("--node", default=None, help="/dev/hidrawN (default: auto, cable preferred)")
-    p.add_argument("--transport", choices=("hid", "gatt"), default="hid", help="hid=paired/USB hidraw (default), gatt=BlueZ FFF2")
+    p.add_argument("--transport", choices=("hid", "gatt", "ble"), default="hid", help="hid=paired/USB hidraw (default), gatt=BlueZ FFF2, ble=bleak FFF2 (needs .[ble], Windows-capable)")
     p.add_argument("--address", default="auto", help="BLE address for gatt transport")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("list", help="list attached coolers")

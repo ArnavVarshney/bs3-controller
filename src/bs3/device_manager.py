@@ -11,6 +11,7 @@ still explorable (banner shows DEMO).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import threading
@@ -78,9 +79,18 @@ class DemoCooler:
 
 
 class DeviceManager:
-    def __init__(self, demo: bool = False):
+    def __init__(self, demo: bool = False, transport: str = "hid", address: str = "auto"):
         self.lock = threading.Lock()
+        self.transport = transport
+        self.address = address
         self.dev: H.HidCooler | None = None
+        self.ble = None  # bleak_backend.BleakCooler (async; driven via _aloop)
+        self._aloop: asyncio.AbstractEventLoop | None = None
+        self._athread: threading.Thread | None = None
+        if transport == "ble":
+            self._aloop = asyncio.new_event_loop()
+            self._athread = threading.Thread(target=self._aloop.run_forever, daemon=True)
+            self._athread.start()
         self.info: dict | None = None
         self.demo = DemoCooler()
         self.use_demo = True
@@ -105,7 +115,11 @@ class DeviceManager:
                 self.use_demo = True
                 self.error = "demo mode: running without hardware"
         else:
-            self._try_connect()
+            # First connect happens off-thread: a BLE link can take tens of
+            # seconds (scan + WinRT connect), and the HTTP server must answer
+            # meanwhile (demo snapshot until the link is up).
+            self._conn_thread = threading.Thread(target=self._try_connect, daemon=True)
+            self._conn_thread.start()
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
 
@@ -130,7 +144,15 @@ class DeviceManager:
             pass
 
     # -- connection --
+    def _run_ble(self, coro, timeout: float = 10.0):
+        """Drive one bleak coroutine from sync code (HTTP threads + poll loop)."""
+        assert self._aloop is not None
+        return asyncio.run_coroutine_threadsafe(coro, self._aloop).result(timeout)
+
     def _try_connect(self):
+        if self.transport == "ble":
+            self._try_connect_ble()
+            return
         found = H.find_coolers()
         if not found:
             with self.lock:
@@ -166,7 +188,67 @@ class DeviceManager:
                 self.use_demo = True
                 self.error = f"{pick['node']}: {e}"
 
+    def _try_connect_ble(self):
+        try:
+            from . import bleak_backend as B
+        except ImportError:
+            with self.lock:
+                self.use_demo = True
+                self.error = "ble transport needs the ble extra: pip install -e .[ble]"
+            return
+        try:
+            addr = self.address
+            if addr.lower() == "auto":
+                pads = self._run_ble(B.find_pads(), timeout=15.0)
+                if not pads:
+                    raise RuntimeError("no FlyDigi BS pad advertising (powered + unconnected?)")
+                addr = pads[0]["address"]
+            ctl = B.BleakCooler(addr)
+            self._run_ble(ctl.connect(), timeout=20.0)
+            fw = self._run_ble(ctl.fw_version())
+            gears = self._run_ble(ctl.gear_table())
+            try:
+                supply = self._run_ble(ctl.supply_level())
+            except TimeoutError:
+                supply = 3
+            with self.lock:
+                if self.ble is not None:
+                    try:
+                        self._run_ble(self.ble.close())
+                    except Exception:
+                        pass
+                if self.dev:
+                    try:
+                        self.dev.close()
+                    except Exception:
+                        pass
+                    self.dev = None
+                self.ble = ctl
+                self.info = {"node": addr, "model": ctl.model or "?",
+                             "transport": "ble", "name": ctl.name}
+                self.fw = fw
+                self.gears = gears
+                self.supply = supply
+                self.use_demo = False
+                self.error = None
+                self.curve._last_sent = None  # fresh link: realtime never survives one
+        except asyncio.CancelledError:
+            return  # shutting down mid-connect
+        except Exception as e:
+            with self.lock:
+                self.use_demo = True
+                self.error = f"ble {self.address}: {e}"
+
     def reconnect(self):
+        if self.transport == "ble":
+            if self.ble is not None:
+                try:
+                    self._run_ble(self.ble.close())
+                except Exception:
+                    pass
+                self.ble = None
+            self._try_connect()
+            return
         if self.dev:
             try:
                 self.dev.close()
@@ -210,21 +292,24 @@ class DeviceManager:
                     self._push_history(t, st["current_rpm"], st["target_rpm"])
             else:
                 try:
-                    assert self.dev is not None
-                    # transact under lock is done here (single owner)
-                    with self.lock:
-                        st_obj = self.dev.read_status_push(timeout=2.5)
-                    if t is not None and self.auto_curve:
-                        want, changed = self.curve.update(t, self.supply, self.model_name())
-                        if changed:
-                            with self.lock:
-                                assert self.dev is not None
-                                self.dev.set_realtime_rpm(want, self.supply, self.model_name())
-                    with self.lock:
-                        self.last_status = _status_to_dict(st_obj)
-                        self.error = None
-                        self._push_history(t, self.last_status["current_rpm"],
-                                           self.last_status["target_rpm"])
+                    if self.transport == "ble":
+                        self._ble_poll_tick(t)
+                    else:
+                        assert self.dev is not None
+                        # transact under lock is done here (single owner)
+                        with self.lock:
+                            st_obj = self.dev.read_status_push(timeout=2.5)
+                        if t is not None and self.auto_curve:
+                            want, changed = self.curve.update(t, self.supply, self.model_name())
+                            if changed:
+                                with self.lock:
+                                    assert self.dev is not None
+                                    self.dev.set_realtime_rpm(want, self.supply, self.model_name())
+                        with self.lock:
+                            self.last_status = _status_to_dict(st_obj)
+                            self.error = None
+                            self._push_history(t, self.last_status["current_rpm"],
+                                               self.last_status["target_rpm"])
                 except (TimeoutError, OSError, RuntimeError, ValueError):
                     # ValueError: fd closed under us by reconnect()/stop()
                     with self.lock:
@@ -232,7 +317,31 @@ class DeviceManager:
                     time.sleep(2)
                     self._try_connect()
                     continue
+                except Exception:
+                    # bleak radio errors (BleakError et al.) are plain Exceptions
+                    with self.lock:
+                        self.error = "link lost — retrying"
+                    time.sleep(2)
+                    self._try_connect()
+                    continue
             time.sleep(0.5)
+
+    def _ble_poll_tick(self, t: float | None) -> None:
+        """One poll iteration over the BLE link (raises on link trouble)."""
+        assert self.ble is not None
+        with self.lock:
+            st_obj = self._run_ble(self.ble.read_status_push(timeout=2.5))
+        if t is not None and self.auto_curve:
+            want, changed = self.curve.update(t, self.supply, self.model_name())
+            if changed:
+                with self.lock:
+                    assert self.ble is not None
+                    self._run_ble(self.ble.set_realtime_rpm(want, self.supply, self.model_name()))
+        with self.lock:
+            self.last_status = _status_to_dict(st_obj)
+            self.error = None
+            self._push_history(t, self.last_status["current_rpm"],
+                               self.last_status["target_rpm"])
 
     def _push_history(self, temp, cur, tgt):
         self.history.append({"t": time.time(), "temp": temp, "rpm": cur, "target": tgt})
@@ -243,6 +352,61 @@ class DeviceManager:
     def _hw(self) -> H.HidCooler | None:
         return None if self.use_demo else self.dev
 
+    def _xact(self, cmd: int, payload: bytes = b"") -> bytes:
+        """One command transaction on the live link (hid or ble)."""
+        if self.transport == "ble":
+            if self.ble is None:
+                raise RuntimeError("no cooler connected")
+            return self._run_ble(self.ble.transact(cmd, payload))
+        dev = self._hw()
+        if not dev:
+            raise RuntimeError("no cooler connected")
+        return dev.transact(cmd, payload)
+
+    def _set_rt(self, rpm: int) -> None:
+        if self.transport == "ble":
+            if self.ble is None:
+                raise RuntimeError("no cooler connected")
+            self._run_ble(self.ble.set_realtime_rpm(rpm, self.supply, self.model_name()))
+            return
+        dev = self._hw()
+        if not dev:
+            raise RuntimeError("no cooler connected")
+        dev.set_realtime_rpm(rpm, self.supply, self.model_name())
+
+    def _release_hw(self) -> None:
+        if self.transport == "ble":
+            if self.ble is None:
+                raise RuntimeError("no cooler connected")
+            self._run_ble(self.ble.release_to_gear())
+            return
+        dev = self._hw()
+        if not dev:
+            raise RuntimeError("no cooler connected")
+        dev.release_to_gear()
+
+    def _select_hw(self, gear1: int) -> None:
+        if self.transport == "ble":
+            if self.ble is None:
+                raise RuntimeError("no cooler connected")
+            self._run_ble(self.ble.select_gear(gear1))
+            return
+        dev = self._hw()
+        if not dev:
+            raise RuntimeError("no cooler connected")
+        dev.select_gear(gear1)
+
+    def _set_gear_rpm_hw(self, idx0: int, rpm: int) -> None:
+        if self.transport == "ble":
+            if self.ble is None:
+                raise RuntimeError("no cooler connected")
+            self._run_ble(self.ble.set_gear_rpm(idx0, rpm))
+            return
+        dev = self._hw()
+        if not dev:
+            raise RuntimeError("no cooler connected")
+        dev.set_gear_rpm(idx0, rpm)
+
     def set_rpm(self, rpm: int) -> dict:
         rpm = P.clamp_rpm(rpm, self.supply if not self.use_demo else 3, self.model_name())
         with self.lock:
@@ -252,10 +416,7 @@ class DeviceManager:
                 self.demo.target = rpm
                 self.demo.realtime = True
             else:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.set_realtime_rpm(rpm, self.supply, self.model_name())
+                self._set_rt(rpm)
             self.save_config()
             return {"target_rpm": rpm}
 
@@ -272,10 +433,7 @@ class DeviceManager:
                 self.demo.realtime = False
                 self.demo.target = self.demo.gears[idx]
             else:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.select_gear(idx + 1)
+                self._select_hw(idx + 1)
             self.save_config()
             return {"gear": name}
 
@@ -287,10 +445,7 @@ class DeviceManager:
                 self.demo.realtime = False
                 self.demo.target = self.demo.gears[self.demo.gear_idx]
             else:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.release_to_gear()
+                self._release_hw()
             self.save_config()
             return {"mode": "gear"}
 
@@ -306,10 +461,7 @@ class DeviceManager:
             if self.use_demo:
                 self.demo.strip = on
             else:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.transact(P.CMD_STRIP_POWER, bytes((0x01 if on else 0x00,)))
+                self._xact(P.CMD_STRIP_POWER, bytes((0x01 if on else 0x00,)))
             self.save_config()
             return {"strip": on}
 
@@ -319,10 +471,7 @@ class DeviceManager:
             if self.use_demo:
                 self.demo.gear_led = on
             else:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.transact(P.CMD_GEAR_LED, bytes((0x01 if on else 0x00,)))
+                self._xact(P.CMD_GEAR_LED, bytes((0x01 if on else 0x00,)))
             self.save_config()
             return {"gear_led": on}
 
@@ -334,12 +483,9 @@ class DeviceManager:
                 self._require_strip_hw()
             self.light["effect"] = effect
             if not self.use_demo:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.transact(P.CMD_STRIP_POWER, b"\x01")
+                self._xact(P.CMD_STRIP_POWER, b"\x01")
                 self.light["strip"] = True
-                dev.transact(P.CMD_SELECT_EFFECT, bytes((effect,)))
+                self._xact(P.CMD_SELECT_EFFECT, bytes((effect,)))
             self.save_config()
             return {"effect": effect}
 
@@ -355,14 +501,11 @@ class DeviceManager:
             self.light.update({"color": [r, g, b], "brightness": brightness,
                                "strip": True, "effect": 0})
             if not self.use_demo:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.transact(P.CMD_STRIP_POWER, b"\x01")
+                self._xact(P.CMD_STRIP_POWER, b"\x01")
                 for cmd, payload in R.upload_plan(header, frames):
-                    dev.transact(cmd, payload)
-                dev.transact(P.CMD_LIGHT_COMMIT, b"\x01")
-                dev.transact(P.CMD_SELECT_EFFECT, b"\x00")
+                    self._xact(cmd, payload)
+                self._xact(P.CMD_LIGHT_COMMIT, b"\x01")
+                self._xact(P.CMD_SELECT_EFFECT, b"\x00")
             self.save_config()
             return self.light
 
@@ -370,10 +513,7 @@ class DeviceManager:
         val = {"off": 0, "instant": 1, "delayed": 2}[mode]
         with self.lock:
             if not self.use_demo:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
-                dev.transact(P.CMD_STANDBY, bytes((val,)))
+                self._xact(P.CMD_STANDBY, bytes((val,)))
             else:
                 self.demo.standby = val
             return {"standby": mode}
@@ -400,11 +540,8 @@ class DeviceManager:
                 self.demo.gears = list(table)
                 self.gears = list(table)
             else:
-                dev = self._hw()
-                if not dev:
-                    raise RuntimeError("no cooler connected")
                 for i, rpm in enumerate(table):
-                    dev.set_gear_rpm(i, rpm)
+                    self._set_gear_rpm_hw(i, rpm)
                 self.gears = list(table)
             return {"gears": self.gears}
 
@@ -434,6 +571,14 @@ class DeviceManager:
 
     def stop(self):
         self._stop.set()
+        if self.transport == "ble" and self.ble is not None:
+            try:
+                self._run_ble(self.ble.close(), timeout=5.0)
+            except Exception:
+                pass
+            self.ble = None
+        if self._aloop is not None:
+            self._aloop.call_soon_threadsafe(self._aloop.stop)
         if self.dev:
             try:
                 self.dev.close()

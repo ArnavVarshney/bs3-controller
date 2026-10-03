@@ -38,6 +38,29 @@ def read_hwmon_temps() -> list[tuple[str, str, float]]:
     return out
 
 
+def _wmi_thermal_temp() -> float | None:
+    """Windows fallback: MSAcpi_ThermalZoneTemperature (tenths of Kelvin).
+
+    Needs a `wmi` package (`pip install wmi`, Windows only) and is coarse
+    next to hwmon, but it is a real sensor reading — enough for the fan
+    curve where nothing else exists. Absent/unreadable -> None.
+    """
+    try:
+        import wmi  # type: ignore
+    except ImportError:
+        return None
+    try:
+        c = wmi.WMI(namespace=r"root\wmi")
+        temps = []
+        for z in c.MSAcpi_ThermalZoneTemperature():
+            t = (int(z.CurrentTemperature) - 2732) / 10.0
+            if 0 < t < 150:
+                temps.append(t)
+        return max(temps) if temps else None
+    except Exception:
+        return None
+
+
 def cpu_temp() -> float:
     """Best-effort package temp: x86_pkg_temp > Tctl/Package > hottest."""
     temps = read_hwmon_temps()
@@ -51,6 +74,9 @@ def cpu_temp() -> float:
             except (OSError, ValueError):
                 pass
         if not zones:
+            wmi_t = _wmi_thermal_temp()
+            if wmi_t is not None:
+                return wmi_t
             raise RuntimeError("no temperature sensors found under /sys/class/hwmon")
         return max(zones)
     for chip, label, t in temps:

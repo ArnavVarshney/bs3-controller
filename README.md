@@ -66,6 +66,12 @@ Two control planes, pick either (or both):
   hidraw (`/dev/hidraw*`) for paired/USB control, BlueZ D-Bus for
   unpaired-BLE GATT, hwmon for CPU temperature, udev for rootless access.
   This is the only place temp curves run (`monitor`, auto-curve).
+- **Python backend on Windows (new, via bleak)** — `bs3-web --transport ble`
+  / `bs3ctl --transport ble` talk GATT FFF2/F1 through bleak's WinRT backend
+  (`pip install -e .[ble]`), so the same dashboard + JSON API works on
+  Windows with no browser involved. CPU temp falls back to the WMI thermal
+  zone where present (coarse, needs no extra package beyond optional `wmi`);
+  with no sensor and no temp source the curve stays inert, same as demo.
 
 What *is* portable in Python (pure, no OS calls): protocol framing,
 fan-curve logic, RGB builders, dashboard UI. On non-Linux the tools import
@@ -78,6 +84,7 @@ use the browser launcher for real hardware there instead of porting hidraw.
 cd bs3-controller
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e .          # add .[gatt] for --transport gatt (needs dbus-next)
+                          # add .[ble] for --transport ble (bleak; the Windows path)
 
 # so you don't need root for hidraw (rule order matters: must sort before 73-seat-late):
 sudo cp udev/70-flydigi-cooler.rules /etc/udev/rules.d/
@@ -114,6 +121,8 @@ Web dashboard (localhost only, no auth — runs as your user):
 bs3-web                       # http://127.0.0.1:8765 (real hardware if present)
 bs3-web --demo                # explore the UI with a simulated cooler
 bs3-web --port 8080           # custom port, still localhost-only
+bs3-web --transport ble       # BLE GATT via bleak (Windows-capable; needs .[ble])
+bs3-web --transport ble --address DC:7F:64:2B:F0:FE   # skip the scan
 ```
 
 Without hardware attached the dashboard falls back to a demo cooler (banner
@@ -203,7 +212,7 @@ src/bs3/controller_cli.py bs3ctl entry
 src/bs3/device_manager.py single-owner device owner for the webapp (+ demo cooler)
 src/bs3/webapp.py         bs3-web entry: localhost dashboard + JSON API
 src/bs3/web/              dashboard UI (index.html, style.css, app.js)
-tests/                    pytest suite (protocol, curve, rgb, manager-demo, webapp HTTP)
+tests/                    pytest suite (protocol, curve, rgb, manager-demo, webapp HTTP, bleak-backend fake-GATT)
 launcher/                 browser launcher (protocol.js/rgb.js/hid.js/gatt.js/device.js/app.js + index.html, parity tests)
 udev/                     hidraw permission rule
 ```
@@ -211,7 +220,7 @@ udev/                     hidraw permission rule
 ## Tests
 
 ```bash
-pip install -e .[dev]
+pip install -e .[dev,ble]
 python -m pytest tests/ -q
 node launcher/protocol.test.js
 node launcher/rgb.test.js
