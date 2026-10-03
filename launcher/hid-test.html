@@ -14,7 +14,8 @@
 <p>Chrome/Edge, served over http://localhost (not file://). USB-C <b>data</b>
 cable to the laptop. <b>Stop bs3-web first</b> — one process must own the pad.</p>
 <div>
-  <button id="connect">Connect</button>
+  <button id="connect">Connect USB (WebHID)</button>
+  <button id="connectBle">Connect BLE (WebBluetooth, Win/Mac)</button>
   <button id="listen" disabled>Listen 3s (no writes)</button>
   <button id="status" disabled>Status</button>
   <button id="info" disabled>FW + supply + gears</button>
@@ -25,6 +26,7 @@ cable to the laptop. <b>Stop bs3-web first</b> — one process must own the pad.
 <pre id="log">not connected</pre>
 <script src="./protocol.js"></script>
 <script src="./hid.js"></script>
+<script src="./gatt.js"></script>
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
@@ -39,6 +41,14 @@ $("connect").onclick = async () => {
     log("collections: " + JSON.stringify(cooler.device.collections, (k, v) => typeof v === "bigint" ? Number(v) : v));
     for (const id of ["listen", "status", "info", "spin", "release"]) $(id).disabled = false;
   } catch (e) { log("connect FAILED: " + e.message); }
+};
+$("connectBle").onclick = async () => {
+  try {
+    cooler = await GattCooler.request();
+    cooler.debug = (m) => { if ($("dbg").checked) log("DBG " + JSON.stringify(m)); };
+    log("open: " + cooler.label);
+    for (const id of ["listen", "status", "info", "spin", "release"]) $(id).disabled = false;
+  } catch (e) { log("ble connect FAILED: " + e.message); }
 };
 $("listen").onclick = async () => {
   try {
@@ -61,8 +71,8 @@ $("info").onclick = async () => {
 };
 $("spin").onclick = async () => {
   try {
-    // supply 1 over laptop USB: 2700 cap applies
-    log("sent=" + await cooler.setRealtimeRpm(2000, 1, "BS3") + " rpm");
+    const supply = await cooler.supplyLevel();
+    log("sent=" + await cooler.setRealtimeRpm(2000, supply, "BS3") + " rpm (supply " + supply + ")");
   } catch (e) { log("spin FAILED: " + e.message); }
 };
 $("release").onclick = async () => {
