@@ -46,7 +46,7 @@ const CMD_GEAR_LED = 0x48;
 const CMD_STATUS_PUSH = 0xef;
 const CMD_MAC_ALT = 0xf0;
 
-// Never-send blocklist (0xDF bricks to the bootloader — see README).
+// Never-send blocklist (0xDF bricks to the bootloader — see docs/FIRMWARE.md).
 const BLOCKED = {
   0xdf: "erases firmware flash sector, bricks cooler until USB reflash",
   0x06: "factory reset, wipes gears/lighting and sleeps device",

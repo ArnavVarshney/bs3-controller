@@ -42,14 +42,14 @@
     <div class="row"><input id="rpm" type="range" min="0" max="4000" step="50" value="1700"><button id="btnRpm">Set</button></div>
     <div class="row"><button id="btnAuto">Release to gear (auto)</button>
       <label class="toggle"><input type="checkbox" id="curveOn"> <span>Temp curve</span></label></div>
-    <p class="muted">Realtime override: gear LEDs blink. 0 = stop, 1–499 → 500 (stall band). Laptop-USB power caps at 2700.</p>
+    <p class="muted">Manual RPM overrides the gear until released. 0 stops the fan; anything under 500 runs at 500.</p>
   </section>
 
   <section class="card">
     <h2>Temp curve</h2>
     <svg id="curve" viewBox="0 0 400 220" width="100%" height="220"></svg>
     <div class="row"><button id="btnCurveSave">Save curve + enable</button><button id="btnCurveReset" class="ghost">Reset</button></div>
-    <p class="muted">Drag points · double-click adds · right-click removes (2–8 pts). Curve stays monotonic — pushed neighbors yield.</p>
+    <p class="muted">Drag points · double-click adds · right-click removes (2–8 pts).</p>
   </section>
 
   <section class="card">
@@ -57,7 +57,7 @@
     <div class="row"><label class="toggle"><input type="checkbox" id="stripOn" checked> <span>Side strip</span></label>
       <label class="toggle"><input type="checkbox" id="gearLedOn" checked> <span>Gear LEDs</span></label></div>
     <div class="fx" id="fxBtns"></div>
-    <p class="muted" id="fxHint">Presets 1–5 need realtime fan mode — set an RPM first.</p>
+    <p class="muted" id="fxHint">Effects 1–5 need a manual RPM set first.</p>
     <p class="muted" id="stripNote" hidden>No side strip on this model (gear LEDs only) — strip controls disabled.</p>
     <div class="row"><input type="color" id="color" value="#68d391"><input id="bright" type="range" min="5" max="100" value="70"><button id="btnUpload">Upload color</button></div>
   </section>
@@ -76,7 +76,7 @@
   </section>
 </main>
 
-<footer class="muted">Open-source, localhost only. Dangerous commands (0xDF brick, 0x06 reset…) are blocked by the server's command blocklist.</footer>
+<footer class="muted">Local dashboard. No account, no cloud.</footer>
 <script src="/app.js"></script>
 </body>
 </html>

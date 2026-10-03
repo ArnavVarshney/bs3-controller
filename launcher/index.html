@@ -59,8 +59,8 @@
     <div class="row"><input id="rpm" type="range" min="0" max="4000" step="50" value="1700"><button id="btnRpm">Set</button></div>
     <div class="row"><button id="btnAuto">Release to gear (auto)</button>
       <label class="toggle"><input type="checkbox" id="curveOn"> <span>Temp curve</span></label></div>
-    <p class="muted">Realtime override: gear LEDs blink. 0 = stop, 1–499 → 500 (stall band). Laptop-USB power caps at 2700.</p>
-    <p class="muted" id="curveNote" hidden>Browser-direct has no CPU-temp API — curve edits are stored locally for the backend; automation runs in <code>bs3-web</code>.</p>
+    <p class="muted">Manual RPM overrides the gear until released. 0 stops the fan; anything under 500 runs at 500.</p>
+    <p class="muted" id="curveNote" hidden>Curve automation runs in bs3-web — browsers can't read CPU temperature.</p>
   </section>
 
   <section class="card">
@@ -75,7 +75,7 @@
     <div class="row"><label class="toggle"><input type="checkbox" id="stripOn" checked> <span>Side strip</span></label>
       <label class="toggle"><input type="checkbox" id="gearLedOn" checked> <span>Gear LEDs</span></label></div>
     <div class="fx" id="fxBtns"></div>
-    <p class="muted" id="fxHint">Presets 1–5 need realtime fan mode — set an RPM first.</p>
+    <p class="muted" id="fxHint">Effects 1–5 need a manual RPM set first.</p>
     <p class="muted" id="stripNote" hidden>No side strip on this model (gear LEDs only) — strip controls disabled.</p>
     <div class="row"><input type="color" id="color" value="#68d391"><input id="bright" type="range" min="5" max="100" value="70"><button id="btnUpload">Upload color</button></div>
   </section>
@@ -94,7 +94,7 @@
   </section>
 </main>
 
-<footer class="muted">Static page, no install — USB via WebHID (Win/Mac/Linux, Chrome/Edge), BLE via WebBluetooth GATT (Win/Mac), backend at 127.0.0.1:8765 when running. Dangerous commands (0xDF brick, 0x06 reset…) are blocked client-side. <a href="./hid-test.html">Diagnostics page</a>.</footer>
+<footer class="muted">Runs entirely in your browser. No account, no cloud.</footer>
 <script src="./protocol.js?v=0.5"></script>
 <script src="./rgb.js?v=0.5"></script>
 <script src="./hid.js?v=0.5"></script>

@@ -33,10 +33,9 @@ speaks `/api`.
 
 Same full control as `bs3ctl`/`bs3-web`: status gauge, gears, exact-RPM
 realtime override + release, gear-table read/write, strip/gear-LED power,
-effects 0–5, static-colour upload, standby — with the same safety blocklist
-(`0xDF` brick, `0x06` reset, … enforced in `protocol.js`) and the same
-per-model adaptation (base BS3: 3 gears, ~3400 rpm ceiling, no side strip —
-strip controls disable/refuse cleanly).
+effects 0–5, static-colour upload, standby — with unsafe commands blocked
+in `protocol.js` and per-model adaptation (base BS3: 3 gears, ~3400 rpm
+ceiling, no side strip — strip controls disable/refuse cleanly).
 
 Hard browser limits (not fixable in JS):
 
@@ -57,7 +56,6 @@ gatt.js       WebBluetooth GATT transport + same API (mirrors gatt_backend.GattC
 device.js     BackendDevice / DirectDevice facade, /api/status-shaped snapshots
 app.js        dashboard (poll 1s, gauge/history/curve editor, transport switch)
 index.html    full dashboard page
-hid-test.html low-level diagnostics (connect/listen/status/fw/supply/gears/spin/release + raw tap)
 *.test.js     runner-free parity tests: node launcher/<name>.test.js
 style.css     dashboard theme (copy of src/bs3/web/style.css + transport bar)
 ```
