@@ -1,4 +1,5 @@
 "use strict";
+(function () {
 /* BS3 protocol core for the browser launcher. Dependency-free.
  * Mirrors src/bs3/protocol.py: same frames, checksums, safety blocklist,
  * 0xEF decode, clamps and per-model caps. Test vectors are shared.
@@ -11,23 +12,39 @@ const MAGIC0 = 0x5a, MAGIC1 = 0xa5;
 const REPORT_IN = 0x01;
 const REPORT_OUT = 0x02;
 const BT_REPORT_LEN = 25;
+const USB_READ_LEN = 32;
 const USB_WRITE_LEN = 31;
 const MAX_PAYLOAD = 15;
+const WRITE_GAP_MS = 10; // firmware 5ms tick; we pace 10ms like hid_backend
 
+// Full safe command surface (mirrors protocol.py).
 const CMD_FW_VERSION = 0x01;
+const CMD_POWER_STATE = 0x02;
+const CMD_QUERY_MAC = 0x04;
 const CMD_SUPPLY = 0x07;
 const CMD_SELECT_GEAR = 0x08;
-const CMD_SET_GEAR_RPM = 0x26;
-const CMD_QUERY_GEARS = 0x27;
+const CMD_QUERY_PRE_MAC = 0x0b;
+const CMD_AUTOSTART = 0x0c;
 const CMD_STANDBY = 0x0d;
 const CMD_SET_RPM = 0x21;
+const CMD_QUERY_RPM = 0x22;
 const CMD_ENTER_REALTIME = 0x23;
 const CMD_EXIT_REALTIME = 0x24;
+const CMD_WORK_MODE = 0x25;
+const CMD_SET_GEAR_RPM = 0x26;
+const CMD_QUERY_GEARS = 0x27;
+const CMD_QUERY_RAMP = 0x29;
+const CMD_SET_RAMP = 0x2a;
+const CMD_LIGHT_BEGIN = 0x41;
+const CMD_LIGHT_BLOCK = 0x42;
 const CMD_LIGHT_COMMIT = 0x43;
 const CMD_SELECT_EFFECT = 0x44;
+const CMD_QUERY_STRIP = 0x45;
 const CMD_STRIP_POWER = 0x46;
+const CMD_WRITE_FRAME = 0x47;
 const CMD_GEAR_LED = 0x48;
 const CMD_STATUS_PUSH = 0xef;
+const CMD_MAC_ALT = 0xf0;
 
 // Never-send blocklist (0xDF bricks to the bootloader — see README).
 const BLOCKED = {
@@ -45,6 +62,7 @@ const SUPPLY_MAX_GEAR = { 0: 4, 1: 2, 2: 3, 3: 4 };
 const GEAR_NAMES = ["quiet", "standard", "strong", "overclock"];
 const STANDBY_NAMES = { 0: "off", 1: "instant", 2: "delayed" };
 
+const MIN_RPM = 0;
 const STALL_LO = 1, STALL_HI = 499;
 const FLOOR_RPM = 500;
 const MAX_RPM = 4000;
@@ -78,6 +96,8 @@ function checkSafe(cmd, payload) {
     if (payload.length !== 1 || payload[0] > 0x01) bad(`0x${cmd.toString(16)} payload must be 00/01`);
   } else if (cmd === CMD_STANDBY) {
     if (payload.length !== 1 || payload[0] > 0x02) bad("0x0D payload must be 00/01/02");
+  } else if (cmd === CMD_AUTOSTART) {
+    if (payload.length !== 1 || (payload[0] !== 0x01 && payload[0] !== 0x02)) bad("0x0C payload must be 01 (on) or 02 (off)");
   } else if (cmd === CMD_SET_GEAR_RPM) {
     if (payload.length !== 3 || payload[0] > 0x03) bad("0x26 payload must be gear 00..03 + u16 LE");
   } else if (cmd === CMD_SET_RPM) {
@@ -152,10 +172,11 @@ function decodeStatus(report) {
   const gearIdx = (b5 >> 1) & 0x03;
   const supply = (b5 >> 5) & 0x03;
   const maxGear = SUPPLY_MAX_GEAR[supply] ?? 4;
+  const effIdx = Math.min(gearIdx, maxGear - 1);
   return {
     asleep: !!(b5 & 0x01),
     gear: GEAR_NAMES[gearIdx],
-    effectiveGear: GEAR_NAMES[Math.min(gearIdx, maxGear - 1)],
+    effectiveGear: GEAR_NAMES[effIdx],
     realtime: !!(b6 & 0x01),
     autostart: !!(b6 & 0x02),
     supply,
@@ -174,14 +195,31 @@ function decodeStatus(report) {
   };
 }
 
+/** Model name from a WebHID productId (mirrors PIDS in protocol.py). */
+function modelFromProductId(pid) {
+  return PIDS[pid] || "?";
+}
+
+/** Model name from a WebBluetooth device name ("FlyDigi BS3" / "FlyDigi BS3PRO"). */
+function modelFromBleName(name) {
+  const n = (name || "").toUpperCase();
+  if (n.includes("BS3PRO") || n.includes("BS3 PRO")) return "BS3 Pro";
+  if (n.includes("BS3")) return "BS3";
+  if (n.includes("BS2")) return "BS2 Pro";
+  return "?";
+}
+
 const API = {
-  VID, PIDS, REPORT_IN, REPORT_OUT, BT_REPORT_LEN, USB_WRITE_LEN, MAX_PAYLOAD,
-  CMD_FW_VERSION, CMD_SUPPLY, CMD_SELECT_GEAR, CMD_SET_GEAR_RPM, CMD_QUERY_GEARS,
-  CMD_STANDBY, CMD_SET_RPM, CMD_ENTER_REALTIME, CMD_EXIT_REALTIME,
-  CMD_LIGHT_COMMIT, CMD_SELECT_EFFECT, CMD_STRIP_POWER, CMD_GEAR_LED, CMD_STATUS_PUSH,
+  VID, PIDS, REPORT_IN, REPORT_OUT, BT_REPORT_LEN, USB_READ_LEN, USB_WRITE_LEN, MAX_PAYLOAD, WRITE_GAP_MS,
+  CMD_FW_VERSION, CMD_POWER_STATE, CMD_QUERY_MAC, CMD_SUPPLY, CMD_SELECT_GEAR,
+  CMD_QUERY_PRE_MAC, CMD_AUTOSTART, CMD_STANDBY, CMD_SET_RPM, CMD_QUERY_RPM,
+  CMD_ENTER_REALTIME, CMD_EXIT_REALTIME, CMD_WORK_MODE, CMD_SET_GEAR_RPM, CMD_QUERY_GEARS,
+  CMD_QUERY_RAMP, CMD_SET_RAMP, CMD_LIGHT_BEGIN, CMD_LIGHT_BLOCK, CMD_LIGHT_COMMIT,
+  CMD_SELECT_EFFECT, CMD_QUERY_STRIP, CMD_STRIP_POWER, CMD_WRITE_FRAME, CMD_GEAR_LED,
+  CMD_STATUS_PUSH, CMD_MAC_ALT,
   BLOCKED, SUPPLY_NAMES, SUPPLY_RPM_CEILING, SUPPLY_MAX_GEAR, GEAR_NAMES, STANDBY_NAMES,
-  FLOOR_RPM, MAX_RPM, MODEL_RPM_CEILING, MODEL_HAS_STRIP, MODEL_GEARS,
-  modelCeiling, modelHasStrip, modelGears,
+  MIN_RPM, STALL_LO, STALL_HI, FLOOR_RPM, MAX_RPM, MODEL_RPM_CEILING, MODEL_HAS_STRIP, MODEL_GEARS,
+  modelCeiling, modelHasStrip, modelGears, modelFromProductId, modelFromBleName,
   checkSafe, buildFrame, buildBtReport, buildUsbReport, verifyFrame, extractFrame,
   clampRpm, decodeStatus,
 };
@@ -190,3 +228,4 @@ if (typeof module !== "undefined") {
 } else if (typeof window !== "undefined") {
   window.bs3protocol = API; // plain <script> include, no bundler
 }
+})();
