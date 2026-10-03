@@ -71,7 +71,81 @@ def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[di
 
 
 _CIM_TTL_S = 4.0  # powershell spawn is ~300ms; don't pay it every poll tick
+_HTTP_TTL_S = 2.0  # localhost HTTP is cheap; still avoid hammering it per tick
 _win_cache: dict = {"at": 0.0, "value": None}
+
+
+def _lhm_http_tree(port: int = 8085, timeout: float = 3.0) -> dict | None:
+    """Fetch LibreHardwareMonitor's data.json (Options -> Web Server -> Run).
+
+    Stdlib urllib, localhost only. Anything failing -> None.
+    """
+    import json
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/data.json",
+                                    timeout=timeout) as r:
+            if r.status != 200:
+                return None
+            return json.load(r)
+    except Exception:
+        return None
+
+
+_CPU_TEMP_NAMES = ("CPU Package", "Tctl", "Tdie", "CPU Core Max", "Core Max",
+                   "CPU Cores Max", "CCD1 (Tdie)", "CCD2 (Tdie)")
+
+
+def _find_cpu_temp(tree: dict) -> float | None:
+    """Walk an LHM data.json tree, return the best CPU temperature reading.
+
+    Prefers known package sensors, else the hottest plausible CPU reading.
+    Pure function (unit-tested); tolerant of missing keys/shape drift.
+    """
+    found: list[tuple[str, str, float]] = []
+
+    def num(v) -> float | None:
+        try:
+            s = "".join(c for c in str(v) if c.isdigit() or c in ".-")
+            f = float(s)
+        except (TypeError, ValueError):
+            return None
+        return f if 0 < f < 150 else None
+
+    def walk(node: dict, hw: str):
+        if not isinstance(node, dict):
+            return
+        kids = node.get("Children") or []
+        text = str(node.get("Text", ""))
+        if kids:
+            for k in kids:
+                walk(k, text if "cpu" in text.lower() or "ryzen" in text.lower()
+                     or "intel" in text.lower() or "amd" in text.lower() else hw)
+        else:
+            v = num(node.get("Value"))
+            if v is not None and hw:
+                found.append((hw, text, v))
+
+    walk(tree, "")
+    if not found:
+        return None
+    for want in _CPU_TEMP_NAMES:
+        for _, name, v in found:
+            if name == want:
+                return v
+    return max(v for _, _, v in found)
+
+
+def _lhm_http_temp() -> float | None:
+    import os
+
+    try:
+        port = int(os.environ.get("BS3_LHM_PORT", "8085"))
+    except ValueError:
+        port = 8085
+    tree = _lhm_http_tree(port)
+    return _find_cpu_temp(tree) if tree else None
 
 
 def _librehardwaremonitor_temp() -> float | None:
@@ -126,15 +200,21 @@ def _wmi_thermal_temp() -> float | None:
 
 
 def _windows_temp() -> float | None:
-    """Best-effort Windows CPU temp, cached for _CIM_TTL_S (spawning
-    powershell every 0.5s poll tick would be absurd)."""
+    """Best-effort Windows CPU temp, cached (spawning helpers every 0.5s
+    poll tick would strobe consoles and hammer localhost).
+
+    Order: LHM web server (Options -> Web Server -> Run; exact silicon
+    readings, cheap HTTP) -> LHM WMI provider -> MSAcpi thermal zone.
+    """
     import time
 
     now = time.monotonic()
-    if now - _win_cache["at"] < _CIM_TTL_S:
+    if now - _win_cache["at"] < _HTTP_TTL_S:
         return _win_cache["value"]
-    v = _librehardwaremonitor_temp()
-    if v is None:
+    v = _lhm_http_temp()
+    if v is None and now - _win_cache["at"] >= _CIM_TTL_S:
+        v = _librehardwaremonitor_temp()
+    if v is None and now - _win_cache["at"] >= _CIM_TTL_S:
         v = _wmi_thermal_temp()
     _win_cache["at"], _win_cache["value"] = now, v
     return v
