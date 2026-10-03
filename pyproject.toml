@@ -1,0 +1,23 @@
+[project]
+name = "bs3-controller"
+version = "0.1.0"
+description = "Open-source Linux controller for Flydigi BS3 / BS3 Pro laptop coolers (no Space Station needed)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+  "dbus-next>=2.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.scripts]
+bs3ctl = "bs3.controller_cli:main"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
