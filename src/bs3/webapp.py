@@ -224,7 +224,8 @@ def _ensure_lhm(path: str | None) -> None:
 
     try:
         probe = subprocess.run(["tasklist", "/FI", "IMAGENAME eq LibreHardwareMonitor.exe"],
-                               capture_output=True, text=True, timeout=15)
+                               capture_output=True, text=True, timeout=15,
+                               creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if "LibreHardwareMonitor.exe" in (probe.stdout or ""):
             return
     except (OSError, subprocess.SubprocessError):

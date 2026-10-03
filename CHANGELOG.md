@@ -61,6 +61,8 @@
   logging), `--lhm` auto-starts LHM minimized, single-instance mutex
   (`BS3Link`) so a second copy exits instead of fighting over radio/port;
   LHM WMI reads both provider namespaces, admin-elevation guidance in errors
+- All Windows helper spawns (WMI queries, tasklist checks) use hidden
+  consoles — no terminal strobe from the background backend
 
 ## 0.1.0 — 2026-10-03
 

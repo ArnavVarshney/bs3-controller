@@ -42,6 +42,8 @@ def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[di
     """Query a WMI namespace via powershell (Windows only, zero new deps).
 
     Returns row dicts (JSON round-trip). Anything failing -> [].
+    Hidden window: these spawn on every poll tick — a visible console
+    flash every few seconds is unacceptable for a background backend.
     """
     import json
     import subprocess
@@ -52,7 +54,8 @@ def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[di
           " -ErrorAction SilentlyContinue | ConvertTo-Json -Compress -Depth 2")
     try:
         out = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
-                             capture_output=True, text=True, timeout=timeout)
+                             capture_output=True, text=True, timeout=timeout,
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     except (OSError, subprocess.SubprocessError):
         return []
     txt = (out.stdout or "").strip()
