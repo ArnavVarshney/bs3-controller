@@ -72,32 +72,36 @@ _win_cache: dict = {"at": 0.0, "value": None}
 
 
 def _librehardwaremonitor_temp() -> float | None:
-    """CPU temp from LibreHardwareMonitor's WMI provider (run LHM portable,
-    admin, once — namespace root\\LibreHardwareMonitor appears while it runs).
+    """CPU temp from LibreHardwareMonitor's WMI provider.
+
+    Run LHM portable AS ADMIN once (its driver needs elevation, otherwise
+    the provider registers empty); namespace is root\\LibreHardwareMonitor
+    on older builds, root\\Hardware on newer ones.
     Prefers CPU Package/Tctl/Tdie, else the hottest CPU-parent sensor."""
-    rows = _cim_query(r"root\LibreHardwareMonitor", "Sensor")
-    cands = []
-    for r in rows:
-        if str(r.get("SensorType", "")) != "Temperature":
-            continue
-        try:
-            v = float(r.get("Value"))
-        except (TypeError, ValueError):
-            continue
-        if not 0 < v < 150:
-            continue
-        parent = str(r.get("Parent", ""))
-        name = str(r.get("Name", ""))
-        if "cpu" not in parent.lower() and "cpu" not in name.lower():
-            continue
-        cands.append((name, parent, v))
-    if not cands:
-        return None
-    for want in ("CPU Package", "Tctl", "Tdie", "CPU Core Max"):
-        for name, _, v in cands:
-            if name == want:
-                return v
-    return max(v for _, _, v in cands)
+    for ns in (r"root\LibreHardwareMonitor", r"root\Hardware"):
+        rows = _cim_query(ns, "Sensor")
+        cands = []
+        for r in rows:
+            if str(r.get("SensorType", "")) != "Temperature":
+                continue
+            try:
+                v = float(r.get("Value"))
+            except (TypeError, ValueError):
+                continue
+            if not 0 < v < 150:
+                continue
+            parent = str(r.get("Parent", ""))
+            name = str(r.get("Name", ""))
+            if "cpu" not in parent.lower() and "cpu" not in name.lower():
+                continue
+            cands.append((name, parent, v))
+        if cands:
+            for want in ("CPU Package", "Tctl", "Tdie", "CPU Core Max"):
+                for name, _, v in cands:
+                    if name == want:
+                        return v
+            return max(v for _, _, v in cands)
+    return None
 
 
 def _wmi_thermal_temp() -> float | None:
@@ -150,6 +154,9 @@ def cpu_temp() -> float:
                 wmi_t = _windows_temp()
                 if wmi_t is not None:
                     return wmi_t
+                raise RuntimeError(
+                    "no CPU temp on Windows: run LibreHardwareMonitor "
+                    "AS ADMINISTRATOR (non-elevated it publishes no sensors)")
             raise RuntimeError("no temperature sensors found under /sys/class/hwmon")
         return max(zones)
     for chip, label, t in temps:

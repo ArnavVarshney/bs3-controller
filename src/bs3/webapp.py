@@ -199,14 +199,75 @@ class Handler(BaseHTTPRequestHandler):
             return _send_json(self, {"error": str(e)}, 500)
 
 
+def _setup_headless_log() -> None:
+    """Windowed exe (bs3-webw) has no console: sys.stdout is None and every
+    print would raise. Redirect to a rolling log file instead."""
+    if sys.stdout is not None:
+        return
+    try:
+        logdir = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                              "BS3 Controller")
+        os.makedirs(logdir, exist_ok=True)
+        log = open(os.path.join(logdir, "bs3-web.log"), "a", buffering=1)
+        sys.stdout = log
+        sys.stderr = log
+    except OSError:
+        pass
+
+
+def _ensure_lhm(path: str | None) -> None:
+    """Make sure LibreHardwareMonitor is running (Windows only), started
+    minimized so boot is silent. No-op when already up or exe not found."""
+    if os.name != "nt":
+        return
+    import subprocess
+
+    try:
+        probe = subprocess.run(["tasklist", "/FI", "IMAGENAME eq LibreHardwareMonitor.exe"],
+                               capture_output=True, text=True, timeout=15)
+        if "LibreHardwareMonitor.exe" in (probe.stdout or ""):
+            return
+    except (OSError, subprocess.SubprocessError):
+        return
+    exe = path
+    if not exe:
+        base = os.path.dirname(sys.executable if getattr(sys, "frozen", False) else __file__)
+        for cand in (os.path.join(base, "lhm", "LibreHardwareMonitor.exe"),
+                     os.path.join(base, "..", "lhm", "LibreHardwareMonitor.exe")):
+            if os.path.isfile(cand):
+                exe = cand
+                break
+    if not exe or not os.path.isfile(exe):
+        print("lhm: LibreHardwareMonitor.exe not found next to the backend — CPU temps stay empty", flush=True)
+        return
+    try:
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 7  # SW_SHOWMINNOACTIVE: no foreground window
+        subprocess.Popen([exe], cwd=os.path.dirname(exe), startupinfo=si,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        print(f"lhm: started {exe} minimized", flush=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        print(f"lhm: could not start ({e})", flush=True)
+
+
 def main(argv=None) -> int:
+    _setup_headless_log()
     ap = argparse.ArgumentParser(prog="bs3-web", description="Local BS3 dashboard (localhost only)")
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--demo", action="store_true", help="demo mode: explore the UI without hardware (no hidraw access)")
     ap.add_argument("--transport", choices=("hid", "ble"), default="hid",
                     help="hid=paired/USB hidraw via Linux (default), ble=BLE GATT via bleak (needs .[ble], works on Windows)")
     ap.add_argument("--address", default="auto", help="BLE address for --transport ble (default: first FlyDigi BS found)")
+    ap.add_argument("--lhm", nargs="?", const="auto", default=None, metavar="PATH",
+                    help="ensure LibreHardwareMonitor runs (Windows CPU temps), started minimized; optional exe path (default: alongside the backend)")
     a = ap.parse_args(argv)
+    from . import singleton
+    if not a.demo and not singleton.acquire("BS3Link"):
+        print(f"bs3-web: {singleton.holder_hint()}", file=sys.stderr)
+        return 1
+    if a.lhm is not None:
+        _ensure_lhm(None if a.lhm == "auto" else a.lhm)
     mgr = DeviceManager(demo=a.demo, transport=a.transport, address=a.address)
     Handler.mgr = mgr
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)

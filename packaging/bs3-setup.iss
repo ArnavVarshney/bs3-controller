@@ -38,23 +38,25 @@ WizardStyle=modern
 
 [Files]
 Source: "..\dist\bs3-web.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\dist\bs3-webw.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\dist\bs3ctl.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\packaging\LHM-ATTRIBUTION.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\packaging\stage\lhm\*"; DestDir: "{app}\lhm"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\BS3 Backend (start server)"; Filename: "{app}\bs3-web.exe"; Parameters: "--transport ble"; WorkingDir: "{app}"
+Name: "{group}\BS3 Backend (start server)"; Filename: "{app}\bs3-web.exe"; Parameters: "--transport ble --lhm"; WorkingDir: "{app}"
 Name: "{group}\BS3 Dashboard (open browser)"; Filename: "http://127.0.0.1:8765/"
 Name: "{group}\LibreHardwareMonitor"; Filename: "{app}\lhm\LibreHardwareMonitor.exe"; Comment: "Run once as admin: feeds CPU temps to the BS3 backend"
 Name: "{group}\Uninstall BS3 Controller"; Filename: "{uninstallexe}"
 
 [Tasks]
-Name: "backend_autostart"; Description: "Start the BS3 backend when I log in"; GroupDescription: "Startup:"
-Name: "lhm_autostart"; Description: "Start LibreHardwareMonitor when I log in (needed for CPU temps)"; GroupDescription: "Startup:"
+Name: "backend_autostart"; Description: "Start the BS3 backend silently when I log in (no window; recommended)"; GroupDescription: "Startup:"; Flags: exclusive
+Name: "backend_console_autostart"; Description: "Start the BS3 backend with a visible window when I log in"; GroupDescription: "Startup:"; Flags: exclusive unchecked
+Name: "no_autostart"; Description: "Do not start anything at login"; GroupDescription: "Startup:"; Flags: exclusive unchecked
 
 [Registry]
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BS3Web"; ValueData: """{app}\bs3-web.exe"" --transport ble"; Tasks: backend_autostart; Flags: uninsdeletevalue
-Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "LibreHardwareMonitor"; ValueData: """{app}\lhm\LibreHardwareMonitor.exe"""; Tasks: lhm_autostart; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BS3Web"; ValueData: """{app}\bs3-webw.exe"" --transport ble --lhm"; Tasks: backend_autostart; Flags: uninsdeletevalue
+Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BS3Web"; ValueData: """{app}\bs3-web.exe"" --transport ble --lhm"; Tasks: backend_console_autostart; Flags: uninsdeletevalue
 
 [Run]
 Filename: "{app}\lhm\LibreHardwareMonitor.exe"; Description: "Run LibreHardwareMonitor now (once as admin enables CPU temps)"; Flags: postinstall skipifsilent runascurrentuser

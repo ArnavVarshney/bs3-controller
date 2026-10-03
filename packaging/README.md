@@ -4,8 +4,10 @@
 
 - `dist/bs3-web.exe`, `dist/bs3ctl.exe` — one-file console builds
   (PyInstaller, bleak bundled, dashboard static files inside).
+- `dist/bs3-webw.exe` — same backend without a console window (autostart
+  builds on boot); prints go to `%LOCALAPPDATA%\BS3 Controller\bs3-web.log`.
 - `dist/bs3-controller-setup-<version>.exe` — Inno Setup installer:
-  both exes, LibreHardwareMonitor portable (unmodified, MPL-2.0 — see
+  all three exes, LibreHardwareMonitor portable (unmodified, MPL-2.0 — see
   `LHM-ATTRIBUTION.txt`), Start Menu shortcuts (backend / dashboard /
   LHM / uninstall), optional logon autostart for backend + LHM
   (opt-in checkboxes, HKLM Run, removed on uninstall).

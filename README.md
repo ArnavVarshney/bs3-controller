@@ -85,8 +85,12 @@ Windows (installer — backend, CLI, LibreHardwareMonitor, shortcuts, optional
 autostart): download `bs3-controller-setup-<version>.exe` from
 [Releases](https://github.com/ArnavVarshney/bs3-controller/releases), run it,
 then Start Menu → **BS3 Backend** (keep the window open) and **BS3 Dashboard**.
-Tick the autostart boxes during setup for always-on temp control. On first
-run, start LibreHardwareMonitor once as admin so CPU temps flow.
+Tick the autostart boxes during setup for always-on temp control (silent
+`bs3-webw.exe`, no window; logs at `%LOCALAPPDATA%\BS3 Controller\`).
+A second copy refuses to start — one BLE link, one HTTP port.
+On first run, start LibreHardwareMonitor once **as admin** (non-elevated it
+publishes no sensors) so CPU temps flow; the backend keeps it running
+minimized afterwards via `--lhm`.
 
 From source (Linux, all features):
 

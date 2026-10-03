@@ -350,6 +350,10 @@ def cmd_standby(a) -> int:
 
 def cmd_monitor(a) -> int:
     """CPU-temp curve loop. Re-applies after reconnect (realtime never survives one)."""
+    from . import singleton
+    if not singleton.acquire("BS3Link"):
+        print(f"bs3ctl: {singleton.holder_hint()}", file=sys.stderr)
+        return 1
     if a.transport == "ble":
         return asyncio.run(_ble_monitor(a))
     cv = C.Curve()

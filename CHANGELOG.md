@@ -57,6 +57,10 @@
   `packaging/LHM-ATTRIBUTION.txt`), shortcuts, opt-in logon autostart;
   `packaging/` holds spec/shims/fetch script/iss + build README;
   tag-triggered `release.yml` builds and publishes installer + exes
+- Boot-quiet Windows service behavior: `bs3-webw.exe` (windowless, file
+  logging), `--lhm` auto-starts LHM minimized, single-instance mutex
+  (`BS3Link`) so a second copy exits instead of fighting over radio/port;
+  LHM WMI reads both provider namespaces, admin-elevation guidance in errors
 
 ## 0.1.0 — 2026-10-03
 

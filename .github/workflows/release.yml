@@ -30,5 +30,6 @@ jobs:
           files: |
             dist/bs3-controller-setup-*.exe
             dist/bs3-web.exe
+            dist/bs3-webw.exe
             dist/bs3ctl.exe
           generate_release_notes: true

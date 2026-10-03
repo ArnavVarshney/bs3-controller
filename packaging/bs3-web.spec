@@ -50,6 +50,12 @@ exe_web = EXE(
     console=True, disable_windowed_traceback=False,
     target_arch=None, codesign_identity=None, entitlements_file=None,
 )
+exe_webw = EXE(
+    pyz_web, a_web.scripts, a_web.binaries, a_web.datas,
+    name="bs3-webw", debug=False, strip=False, upx=False,
+    console=False, disable_windowed_traceback=False,
+    target_arch=None, codesign_identity=None, entitlements_file=None,
+)
 exe_cli = EXE(
     pyz_cli, a_cli.scripts, a_cli.binaries, a_cli.datas,
     name="bs3ctl", debug=False, strip=False, upx=False,
