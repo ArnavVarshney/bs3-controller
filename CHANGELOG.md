@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 — 2026-10-03
+## 0.2.0 — 2026-10-04
 
 - Browser dashboard (`launcher/`, hosted on GitHub Pages): the full
   dashboard with no install — USB and Bluetooth direct control plus
