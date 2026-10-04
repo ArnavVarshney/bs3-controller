@@ -16,7 +16,7 @@
 ;   under the admin install this package needs (Program Files + LHM driver).
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.3.0"
 #endif
 
 [Setup]

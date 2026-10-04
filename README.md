@@ -24,8 +24,9 @@ gears, ~3400 rpm ceiling, gear LEDs only).
   temp-curve *automation* stays with the backend.
 - **Python backend** — `bs3ctl`/`bs3-web` over hidraw (Linux paired/USB),
   BlueZ D-Bus (Linux unpaired BLE), or bleak GATT (`--transport ble`,
-  the Windows path). CPU temp via hwmon on Linux, LibreHardwareMonitor
-  on Windows. This is the only place temp curves run.
+  the Windows path). CPU+GPU temps via hwmon on Linux,
+  LibreHardwareMonitor on Windows. This is the only place temp curves
+  run — driven by the hotter die (or CPU/GPU-only, your choice).
 
 With no cooler attached the tools say so plainly and keep retrying —
 no simulation.
@@ -35,8 +36,8 @@ no simulation.
 Windows: download `bs3-controller-setup-<version>.exe` from
 [Releases](https://github.com/ArnavVarshney/bs3-controller/releases), run
 it, then Start Menu → **BS3 Backend** and **BS3 Dashboard**. Tick the
-autostart boxes for always-on temp control (silent `bs3-webw.exe`, no
-window; logs at `%LOCALAPPDATA%\BS3 Controller\`). A second copy refuses
+autostart boxes for always-on temp control (silent `bs3-webw.exe` with a
+tray icon showing live RPM/temps; logs at `%LOCALAPPDATA%\BS3 Controller\`). A second copy refuses
 to start — one BLE link, one HTTP port. Start LibreHardwareMonitor once
 **as admin** so CPU temps flow; the backend keeps it running minimized
 afterwards via `--lhm`.
@@ -68,7 +69,7 @@ bs3ctl auto         # back to gear mode
 bs3ctl gears        # stored table + supply gating
 bs3ctl set-gear-rpm quiet 1500
 bs3ctl standby delayed
-bs3ctl monitor --interval 4   # CPU-temp fan curve until Ctrl-C
+bs3ctl monitor --interval 4   # temp fan curve until Ctrl-C (hotter of CPU/GPU; --temp-source cpu|gpu|max)
 ```
 
 ```bash
@@ -76,6 +77,7 @@ bs3-web                       # http://127.0.0.1:8765
 bs3-web --port 8080           # custom port, still localhost-only
 bs3-web --transport ble       # BLE GATT via bleak (needs .[ble])
 bs3-web --transport ble --address DC:7F:64:2B:F0:FE   # skip the scan
+bs3-web --tray                # Windows tray icon: live tooltip, dashboard/reconnect/quit (needs .[tray])
 ```
 
 ### HTTP API
@@ -91,7 +93,8 @@ bs3-web --transport ble --address DC:7F:64:2B:F0:FE   # skip the scan
 | POST | `/api/effect` | `{effect: 0..5}` |
 | POST | `/api/rgb-upload` | `{r, g, b, brightness}` |
 | POST | `/api/standby` | `{mode: off\|instant\|delayed}` |
-| POST | `/api/curve` | `{points: [[temp, rpm]…] (2–8 pts), enabled}` |
+| POST | `/api/curve` | `{points: [[temp, rpm]…] (2–8 pts), enabled, source?: cpu\|gpu\|max}` |
+| POST | `/api/logs` | last 200 lines of the backend log (windowed mode) |
 | POST | `/api/gear-table` | `{gears: [4 × 500..4000]}` (writes cooler flash) |
 | POST | `/api/reconnect` | rescan and reconnect |
 

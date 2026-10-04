@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.3.0 — 2026-10-04
+
+- GPU-temperature curves: the fan curve follows the hotter of CPU/GPU
+  (or CPU-only / GPU-only via the curve card selector and
+  `bs3ctl monitor --temp-source`). GPU readings from hwmon on Linux and
+  LibreHardwareMonitor on Windows; APU heat stays with the CPU.
+- Windows tray icon: the background backend shows live RPM/temps in its
+  tooltip, with Open dashboard / Reconnect / Quit menu. Silent autostart
+  uses it.
+- Status transparency: new System card (backend version, link transport,
+  per-die sensor sources) plus log download (`POST /api/logs`).
+- Dashboards render on change (no per-second rebuilds), idle tabs stay
+  near 0% CPU; backend fetches time out instead of wedging the poll loop.
+- Backend connection logging (timestamped, change-deduped) so the log
+  always shows connects, drops, and retry reasons.
+
 ## 0.2.0 — 2026-10-04
 
 - Browser dashboard (`launcher/`, hosted on GitHub Pages): the full

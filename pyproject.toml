@@ -1,6 +1,6 @@
 [project]
 name = "bs3-controller"
-version = "0.2.0"
+version = "0.3.0"
 description = "Open-source Linux controller for Flydigi BS3 / BS3 Pro laptop coolers (no Space Station needed)"
 readme = "README.md"
 requires-python = ">=3.11"
