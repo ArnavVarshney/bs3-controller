@@ -17,7 +17,7 @@ API:
   POST /api/effect            {effect: 0..5}
   POST /api/rgb-upload        {r,g,b, brightness}
   POST /api/standby           {mode: off|instant|delayed}
-  POST /api/curve             {points: [[temp,rpm]...], enabled: bool}
+  POST /api/curve             {points: [[temp,rpm]...], enabled: bool, source?: cpu|gpu|max}
   POST /api/gear-table        {gears: [r0,r1,r2,r3]}
   POST /api/reconnect
 """
@@ -180,7 +180,8 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/standby":
                 out = m.set_standby(_req_str(body, "mode"))
             elif path == "/api/curve":
-                out = m.set_curve(_req_list(body, "points"), _req_bool(body, "enabled", True))
+                out = m.set_curve(_req_list(body, "points"), _req_bool(body, "enabled", True),
+                                  body.get("source", "max"))
             elif path == "/api/gear-table":
                 gears = _req_list(body, "gears")
                 if len(gears) != 4 or any(isinstance(x, bool) or not isinstance(x, int) for x in gears):

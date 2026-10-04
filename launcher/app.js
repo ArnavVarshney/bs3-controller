@@ -182,6 +182,7 @@ function render(s) {
   setText("rpmText", cur);
   setText("tRpm", st.target_rpm + " rpm");
   setText("cpu", s.cpu_temp == null ? "–" : s.cpu_temp.toFixed(1) + "°C");
+  setText("gpu", s.gpu_temp == null ? "–" : s.gpu_temp.toFixed(1) + "°C");
   setText("mode", st.mode + (st.realtime ? " (override)" : ""));
   setText("supply", st.supply_name + " (" + st.rpm_ceiling + " cap)");
   setText("chipGear", "gear " + st.gear + " → " + st.effective_gear);
@@ -197,6 +198,7 @@ function render(s) {
   });
   if (document.activeElement !== $("rpm")) { $("rpm").value = st.target_rpm; setText("rpmVal", st.target_rpm); }
   if (!$("curveOn").matches(":focus")) $("curveOn").checked = !!s.auto_curve;
+  if (document.activeElement !== $("tempSrc")) $("tempSrc").value = s.temp_source || "max";
   // Browser-direct has no CPU-temp automation: keep the toggle visible but inert.
   $("curveOn").disabled = TRANSPORT !== "Backend";
   $("curveOn").title = TRANSPORT === "Backend" ? "" : "Temperature automation runs in the BS3 backend app.";
@@ -282,17 +284,21 @@ function drawHist(h) {
   const line = (key, max, color, dash) => {
     ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash(dash || []);
     ctx.beginPath();
+    let pen = false;
     h.forEach((p, i) => {
       const v = p[key];
       const x = (i / (HIST_N - 1)) * W;
-      const y = v == null ? H : H - Math.min(Math.max(v / max, 0), 1) * (H - 8) - 4;
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      if (v == null) { pen = false; return; } // gap, not 0: absent sensor
+      const y = H - Math.min(Math.max(v / max, 0), 1) * (H - 8) - 4;
+      if (!pen || i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      pen = true;
     });
     ctx.stroke(); ctx.setLineDash([]);
   };
   line("rpm", M, "#6fd3ff");
   line("target", M, "#6fd3ff", [4, 3]);
   line("temp", 100, "#f6c453");
+  line("gpu", 100, "#b794f6", [2, 2]);
 }
 
 /* ---------- curve editor ---------- */
@@ -451,17 +457,21 @@ function wire() {
   $("btnRpm").onclick = async () => { try { await callAction(DEV.setRpm, Number($("rpm").value)); } catch (e) { showErr(e.message); } };
   $("btnAuto").onclick = async () => { try { await callAction(DEV.release); } catch (e) { showErr(e.message); } };
   $("curveOn").onchange = async () => {
-    try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked); }
+    try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked, $("tempSrc").value); }
     catch (e) { showErr(e.message); }
   };
   $("btnCurveSave").onclick = async () => {
-    try { await callAction(DEV.setCurve, localCurve, true); $("curveOn").checked = TRANSPORT === "Backend"; markClean(); }
+    try { await callAction(DEV.setCurve, localCurve, true, $("tempSrc").value); $("curveOn").checked = TRANSPORT === "Backend"; markClean(); }
     catch (e) { showErr(e.message); }
   };
   $("btnCurveReset").onclick = async () => {
     localCurve = DEFAULT_CURVE.map((p) => [...p]);
     drawCurve();
-    try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked); markClean(); }
+    try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked, $("tempSrc").value); markClean(); }
+    catch (e) { showErr(e.message); }
+  };
+  $("tempSrc").onchange = async () => {
+    try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked, $("tempSrc").value); }
     catch (e) { showErr(e.message); }
   };
   $("stripOn").onchange = async () => { try { await callAction(DEV.setStrip, $("stripOn").checked); } catch (e) { showErr(e.message); } };

@@ -53,6 +53,9 @@ class DeviceManager:
         self.gears = [1700, 2400, 3000, 3700]
         self.last_status: dict | None = None
         self.cpu_temp: float | None = None
+        self.gpu_temp: float | None = None
+        self.temp_sources: dict = {"cpu": None, "gpu": None}
+        self.temp_source = "max"  # curve input: cpu, gpu, or hotter-of-both
         self.error: str | None = None
         self.auto_curve = False
         self.curve = C.Curve()
@@ -81,6 +84,8 @@ class DeviceManager:
             self.curve.points = [(float(t), int(r)) for t, r in cfg.get("curve", C.DEFAULT_CURVE)]
             self.light.update(cfg.get("light", {}))
             self.auto_curve = bool(cfg.get("auto_curve", False))
+            if cfg.get("temp_source") in self.TEMP_SOURCES:
+                self.temp_source = cfg["temp_source"]
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
@@ -89,7 +94,8 @@ class DeviceManager:
             os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
             with open(CONFIG_PATH, "w") as f:
                 json.dump({"curve": self.curve.points, "light": self.light,
-                           "auto_curve": self.auto_curve}, f, indent=2)
+                           "auto_curve": self.auto_curve,
+                           "temp_source": self.temp_source}, f, indent=2)
         except OSError:
             pass
 
@@ -228,11 +234,15 @@ class DeviceManager:
     def _loop(self):
         while not self._stop.is_set():
             try:
-                t = sensors.cpu_temp()
+                d = sensors.die_temps()
             except RuntimeError:
-                t = None
+                d = {"cpu": None, "gpu": None,
+                     "cpu_source": None, "gpu_source": None}
             with self.lock:
-                self.cpu_temp = t
+                self.cpu_temp = d["cpu"]
+                self.gpu_temp = d["gpu"]
+                self.temp_sources = {"cpu": d["cpu_source"], "gpu": d["gpu_source"]}
+                t = self._drive_temp_locked()
             if not self.connected:
                 # No link yet (or lost and not yet re-established): the pad
                 # may appear later (powered on / back in range); retry rarely.
@@ -274,6 +284,22 @@ class DeviceManager:
                     continue
             time.sleep(0.5)
 
+    def _drive_temp_locked(self) -> float | None:
+        """Curve input under lock: selected die, or the hotter of both.
+
+        One fan, two heat sources — the hotter die sets the pace so neither
+        can exceed the curve (same policy as FanControl/Argus mixes)."""
+        if self.temp_source == "cpu":
+            return self.cpu_temp
+        if self.temp_source == "gpu":
+            return self.gpu_temp
+        avail = [x for x in (self.cpu_temp, self.gpu_temp) if x is not None]
+        return max(avail) if avail else None
+
+    def drive_temp(self) -> float | None:
+        with self.lock:
+            return self._drive_temp_locked()
+
     def _ble_poll_tick(self, t: float | None) -> None:
         """One poll iteration over the BLE link (raises on link trouble)."""
         assert self.ble is not None
@@ -291,8 +317,10 @@ class DeviceManager:
             self._push_history(t, self.last_status["current_rpm"],
                                self.last_status["target_rpm"])
 
-    def _push_history(self, temp, cur, tgt):
-        self.history.append({"t": time.time(), "temp": temp, "rpm": cur, "target": tgt})
+    def _push_history(self, drive, cur, tgt):
+        self.history.append({"t": time.time(), "temp": drive,
+                             "cpu": self.cpu_temp, "gpu": self.gpu_temp,
+                             "rpm": cur, "target": tgt})
         if len(self.history) > HISTORY_N:
             del self.history[:len(self.history) - HISTORY_N]
 
@@ -455,18 +483,23 @@ class DeviceManager:
             self._xact(P.CMD_STANDBY, bytes((val,)))
             return {"standby": mode}
 
-    def set_curve(self, points: list, enabled: bool) -> dict:
+    TEMP_SOURCES = ("max", "cpu", "gpu")
+
+    def set_curve(self, points: list, enabled: bool, source: str = "max") -> dict:
         pts = sorted([(float(t), int(r)) for t, r in points])
         if len(pts) < 2 or len(pts) > 8:
             raise ValueError("curve needs 2..8 points")
         if any(b - a < 0.05 for a, b in zip([t for t, _ in pts], [t for t, _ in pts][1:])):
             raise ValueError("curve temps must differ (interpolation divides by temp gaps)")
+        if source not in self.TEMP_SOURCES:
+            raise ValueError("source is cpu, gpu or max")
         with self.lock:
             self.curve.points = pts
             self.curve._last_sent = None
             self.auto_curve = enabled
+            self.temp_source = source
             self.save_config()
-            return {"curve": pts, "auto_curve": enabled}
+            return {"curve": pts, "auto_curve": enabled, "temp_source": source}
 
     def set_gear_table(self, table: list[int]) -> dict:
         # 4 slots even on 3-gear models: the flash table physically holds 4
@@ -493,6 +526,10 @@ class DeviceManager:
                 "fw": self.fw,
                 "status": self.last_status,
                 "cpu_temp": self.cpu_temp,
+                "gpu_temp": self.gpu_temp,
+                "drive_temp": self._drive_temp_locked(),
+                "temp_source": self.temp_source,
+                "temp_sources": dict(self.temp_sources),
                 "supply": self.supply,
                 "gears": self.gears,
                 "gear_names": P.model_gears(model),

@@ -18,7 +18,8 @@ from bs3 import sensors
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(H, "find_coolers", lambda: [])
-    monkeypatch.setattr(sensors, "cpu_temp", lambda: 60.0)
+    monkeypatch.setattr(sensors, "die_temps", lambda: {
+        "cpu": 60.0, "gpu": None, "cpu_source": "test", "gpu_source": None})
     monkeypatch.setattr(D, "CONFIG_PATH", str(tmp_path / "config.json"))
 
 
@@ -33,6 +34,9 @@ def test_no_hardware_state(isolated):
         assert s["error"]  # truthful reason, not a simulation
         assert s["history"] == []
         assert s["cpu_temp"] == 60.0  # sensors stay live without a pad
+        assert s["gpu_temp"] is None  # no dGPU in the stub
+        assert s["drive_temp"] == 60.0
+        assert s["temp_source"] == "max"
         assert s["model"] == "?"
         for fn in (lambda: mgr.set_rpm(2600),
                    lambda: mgr.select_gear("strong"),
@@ -51,6 +55,11 @@ def test_no_hardware_state(isolated):
         assert mgr.set_curve([[35, 1000], [55, 2000]], True)["auto_curve"] is True
         with pytest.raises(ValueError):
             mgr.set_curve([[35, 1000]], False)
+        with pytest.raises(ValueError, match="source"):
+            mgr.set_curve([[35, 1000], [55, 2000]], True, "lava")
+        assert mgr.set_curve([[35, 1000], [55, 2000]], True, "gpu")["temp_source"] == "gpu"
+        assert mgr.snapshot()["temp_source"] == "gpu"
+        assert mgr.drive_temp() is None  # gpu selected, no GPU sensor
         mgr.reconnect()  # still no hardware -> stays unconnected
         assert mgr.snapshot()["status"] is None
     finally:
@@ -125,5 +134,19 @@ def test_hardware_appearing_connects(isolated, monkeypatch):
         assert s["error"] is None
         assert mgr.set_rpm(2600) == {"target_rpm": 2600}
         assert mgr.release() == {"mode": "gear"}
+    finally:
+        mgr.stop()
+
+
+def test_drive_temp_max_of_both_dies(isolated, monkeypatch):
+    """One fan, two heat sources: the hotter die sets the pace."""
+    monkeypatch.setattr(sensors, "die_temps", lambda: {
+        "cpu": 55.0, "gpu": 72.5, "cpu_source": "test", "gpu_source": "test"})
+    mgr = D.DeviceManager()
+    try:
+        time.sleep(0.6)  # poll loop picks up both readings
+        assert mgr.snapshot()["drive_temp"] == 72.5
+        assert mgr.set_curve([[35, 1000], [55, 2000]], False, "cpu")["temp_source"] == "cpu"
+        assert mgr.drive_temp() == 55.0
     finally:
         mgr.stop()

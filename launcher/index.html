@@ -47,6 +47,7 @@
       <div class="statCol">
         <div><label>Target</label><b id="tRpm">–</b></div>
         <div><label>CPU</label><b id="cpu">–</b></div>
+        <div><label>GPU</label><b id="gpu">–</b></div>
         <div><label>Mode</label><b id="mode">–</b></div>
         <div><label>Supply</label><b id="supply">–</b></div>
       </div>
@@ -70,7 +71,8 @@
   <section class="card">
     <h2>Temp curve</h2>
     <svg id="curve" viewBox="0 0 400 220" width="100%" height="220"></svg>
-    <div class="row"><button id="btnCurveSave">Save curve + enable</button><button id="btnCurveReset" class="ghost">Reset</button></div>
+    <div class="row"><button id="btnCurveSave">Save curve + enable</button><button id="btnCurveReset" class="ghost">Reset</button>
+      <select id="tempSrc" title="Which temperature drives the curve"><option value="max">hotter of CPU/GPU</option><option value="cpu">CPU only</option><option value="gpu">GPU only</option></select></div>
     <p class="muted">Drag points · double-click adds · right-click removes (2–8 pts).</p>
   </section>
 

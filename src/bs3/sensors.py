@@ -72,7 +72,8 @@ def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[di
 
 _CIM_TTL_S = 4.0  # powershell spawn is ~300ms; don't pay it every poll tick
 _HTTP_TTL_S = 2.0  # localhost HTTP is cheap; still avoid hammering it per tick
-_win_cache: dict = {"at": 0.0, "value": None}
+_win_cache: dict = {"at": 0.0, "value": None, "gpu": None,
+                    "cpu_source": None, "gpu_source": None}
 
 
 def _lhm_http_tree(port: int = 8085, timeout: float = 3.0) -> dict | None:
@@ -96,16 +97,23 @@ def _lhm_http_tree(port: int = 8085, timeout: float = 3.0) -> dict | None:
 _CPU_TEMP_NAMES = ("CPU Package", "Tctl", "Tdie", "CPU Core Max", "Core Max",
                    "CPU Cores Max", "CCD1 (Tdie)", "CCD2 (Tdie)")
 
+_GPU_HW_KEYS = ("nvidia", "geforce", "quadro", "radeon", "arc")
+_CPU_HW_KEYS = ("cpu", "ryzen", "intel", "core i", "xeon", "epyc",
+                "athlon", "celeron", "pentium")
+_GPU_TEMP_NAMES = ("GPU Hot Spot", "GPU Core", "GPU Memory Junction", "GPU Memory")
 
-def _find_cpu_temp(tree: dict) -> float | None:
-    """Walk an LHM data.json tree, return the best CPU temperature reading.
 
-    Only leaves under a *Temperature* sensor group count — the tree mixes
-    clocks (MHz), loads (%), power (W) and volts (V) whose bare numbers
-    would otherwise pass any range check. Prefers known package sensors,
-    else the hottest temperature-group reading. Pure function (unit-tested).
-    """
-    found: list[tuple[str, str, float]] = []
+def _is_gpu_hw(text: str) -> bool:
+    """Discrete-GPU hardware node? CPU keywords win: an APU reporting
+    "AMD Ryzen ... with Radeon Graphics" is the CPU die (same heat)."""
+    t = text.lower()
+    return (any(k in t for k in _GPU_HW_KEYS)
+            and not any(k in t for k in _CPU_HW_KEYS))
+
+
+def _walk_temp_leaves(tree: dict) -> list[tuple[str, str, float]]:
+    """All (hardware, leaf name, °C) under *Temperature* groups. Shared by
+    the CPU and GPU pickers so both see the same honest tree."""
 
     def num(v) -> float | None:
         try:
@@ -114,6 +122,8 @@ def _find_cpu_temp(tree: dict) -> float | None:
         except (TypeError, ValueError):
             return None
         return f if 0 < f < 150 else None
+
+    found: list[tuple[str, str, float]] = []
 
     def walk(node: dict, hw: str, group: str):
         if not isinstance(node, dict):
@@ -124,7 +134,8 @@ def _find_cpu_temp(tree: dict) -> float | None:
             leaves = [k for k in kids if isinstance(k, dict) and not (k.get("Children") or [])]
             g = text if leaves else group
             h = text if "cpu" in text.lower() or "ryzen" in text.lower() \
-                or "intel" in text.lower() or "amd" in text.lower() else hw
+                or "intel" in text.lower() or "amd" in text.lower() \
+                or _is_gpu_hw(text) else hw
             for k in kids:
                 walk(k, h, g)
         elif "temp" in group.lower() and hw:
@@ -133,6 +144,20 @@ def _find_cpu_temp(tree: dict) -> float | None:
                 found.append((hw, text, v))
 
     walk(tree, "", "")
+    return found
+
+
+def _find_cpu_temp(tree: dict) -> float | None:
+    """Walk an LHM data.json tree, return the best CPU temperature reading.
+
+    Only leaves under a *Temperature* sensor group count — the tree mixes
+    clocks (MHz), loads (%), power (W) and volts (V) whose bare numbers
+    would otherwise pass any range check. GPU hardware never counts here
+    (see _find_gpu_temp). Prefers known package sensors, else the hottest
+    temperature-group reading. Pure function (unit-tested).
+    """
+    found = [(hw, name, v) for hw, name, v in _walk_temp_leaves(tree)
+             if not _is_gpu_hw(hw)]
     if not found:
         return None
     for want in _CPU_TEMP_NAMES:
@@ -140,6 +165,39 @@ def _find_cpu_temp(tree: dict) -> float | None:
             if name == want or want in name:
                 return v
     return max(v for _, _, v in found)
+
+
+def _find_cpu_temp_ex(tree: dict) -> tuple[float | None, str | None]:
+    """(_find_cpu_temp value, matched leaf name) for source transparency."""
+    found = [(hw, name, v) for hw, name, v in _walk_temp_leaves(tree)
+             if not _is_gpu_hw(hw)]
+    if not found:
+        return None, None
+    for want in _CPU_TEMP_NAMES:
+        for _, name, v in found:
+            if name == want or want in name:
+                return v, name
+    top = max(found, key=lambda e: e[2])
+    return top[2], top[1]
+
+
+def _find_gpu_temp(tree: dict) -> tuple[float | None, str | None]:
+    """(value, leaf name) of the best discrete-GPU temperature reading.
+
+    Same temperature-group gating as the CPU picker (clocks/loads/power
+    decoys never count). APU/iGPU nodes report the CPU die — those stay
+    with the CPU picker (see _is_gpu_hw). Pure function (unit-tested).
+    """
+    found = [(hw, name, v) for hw, name, v in _walk_temp_leaves(tree)
+             if _is_gpu_hw(hw)]
+    if not found:
+        return None, None
+    for want in _GPU_TEMP_NAMES:
+        for _, name, v in found:
+            if name == want or want in name:
+                return v, name
+    top = max(found, key=lambda e: e[2])
+    return top[2], top[1]
 
 
 def _lhm_http_temp() -> float | None:
@@ -153,17 +211,12 @@ def _lhm_http_temp() -> float | None:
     return _find_cpu_temp(tree) if tree else None
 
 
-def _librehardwaremonitor_temp() -> float | None:
-    """CPU temp from LibreHardwareMonitor's WMI provider.
-
-    Run LHM portable AS ADMIN once (its driver needs elevation, otherwise
-    the provider registers empty); namespace is root\\LibreHardwareMonitor
-    on older builds, root\\Hardware on newer ones.
-    Prefers CPU Package/Tctl/Tdie, else the hottest CPU-parent sensor."""
+def _lhm_wmi_rows() -> list[tuple[str, str, float]]:
+    """(parent hardware, sensor name, °C) temperature rows from LHM's WMI
+    provider (both namespaces). Shared by the CPU and GPU pickers."""
+    rows: list[tuple[str, str, float]] = []
     for ns in (r"root\LibreHardwareMonitor", r"root\Hardware"):
-        rows = _cim_query(ns, "Sensor")
-        cands = []
-        for r in rows:
+        for r in _cim_query(ns, "Sensor"):
             if str(r.get("SensorType", "")) != "Temperature":
                 continue
             try:
@@ -172,18 +225,41 @@ def _librehardwaremonitor_temp() -> float | None:
                 continue
             if not 0 < v < 150:
                 continue
-            parent = str(r.get("Parent", ""))
-            name = str(r.get("Name", ""))
-            if "cpu" not in parent.lower() and "cpu" not in name.lower():
-                continue
-            cands.append((name, parent, v))
-        if cands:
-            for want in ("CPU Package", "Tctl", "Tdie", "CPU Core Max"):
-                for name, _, v in cands:
-                    if name == want:
-                        return v
-            return max(v for _, _, v in cands)
-    return None
+            rows.append((str(r.get("Parent", "")), str(r.get("Name", "")), v))
+    return rows
+
+
+def _librehardwaremonitor_temp() -> float | None:
+    """CPU temp from LibreHardwareMonitor's WMI provider.
+
+    Run LHM portable AS ADMIN once (its driver needs elevation, otherwise
+    the provider registers empty); namespace is root\\LibreHardwareMonitor
+    on older builds, root\\Hardware on newer ones.
+    Prefers CPU Package/Tctl/Tdie, else the hottest CPU-parent sensor."""
+    cands = [(name, parent, v) for parent, name, v in _lhm_wmi_rows()
+             if "cpu" in parent.lower() or "cpu" in name.lower()]
+    if not cands:
+        return None
+    for want in ("CPU Package", "Tctl", "Tdie", "CPU Core Max"):
+        for name, _, v in cands:
+            if name == want:
+                return v
+    return max(v for _, _, v in cands)
+
+
+def _librehardwaremonitor_gpu() -> tuple[float | None, str | None]:
+    """(value, sensor name) of the best discrete-GPU temp from LHM's WMI
+    provider. Same APU rule as _is_gpu_hw: CPU-die heat stays with the CPU."""
+    cands = [(name, parent, v) for parent, name, v in _lhm_wmi_rows()
+             if _is_gpu_hw(parent)]
+    if not cands:
+        return None, None
+    for want in _GPU_TEMP_NAMES:
+        for name, _, v in cands:
+            if name == want or want in name:
+                return v, name
+    top = max(cands, key=lambda e: e[2])
+    return top[2], top[0]
 
 
 def _wmi_thermal_temp() -> float | None:
@@ -204,32 +280,104 @@ def _wmi_thermal_temp() -> float | None:
     return max(temps) if temps else None
 
 
-def _windows_temp() -> float | None:
-    """Best-effort Windows CPU temp, cached (spawning helpers every 0.5s
+def _windows_die_temps() -> dict:
+    """Best-effort Windows CPU+GPU temps, cached (spawning helpers every 0.5s
     poll tick would strobe consoles and hammer localhost).
 
     Order: LHM web server (Options -> Web Server -> Run; exact silicon
-    readings, cheap HTTP) -> LHM WMI provider -> MSAcpi thermal zone.
+    readings, cheap HTTP) -> LHM WMI provider -> MSAcpi thermal zone
+    (CPU only). Keys: cpu/gpu values (None when absent) plus per-die
+    source labels for the dashboard. The WMI/thermal fallbacks only run
+    past their TTL so a dead LHM doesn't cost a powershell spawn per tick.
     """
     import time
 
     now = time.monotonic()
     if now - _win_cache["at"] < _HTTP_TTL_S:
-        return _win_cache["value"]
-    v = _lhm_http_temp()
-    if v is None and now - _win_cache["at"] >= _CIM_TTL_S:
-        v = _librehardwaremonitor_temp()
-    if v is None and now - _win_cache["at"] >= _CIM_TTL_S:
-        v = _wmi_thermal_temp()
-    _win_cache["at"], _win_cache["value"] = now, v
-    return v
+        return {"cpu": _win_cache["value"], "gpu": _win_cache["gpu"],
+                "cpu_source": _win_cache["cpu_source"],
+                "gpu_source": _win_cache["gpu_source"]}
+    cpu = gpu = cpu_src = gpu_src = None
+    try:
+        port = int(os.environ.get("BS3_LHM_PORT", "8085"))
+    except ValueError:
+        port = 8085
+    tree = _lhm_http_tree(port)
+    if tree is not None:
+        v, name = _find_cpu_temp_ex(tree)
+        if v is not None:
+            cpu, cpu_src = v, f"LHM web · {name}"
+        v, name = _find_gpu_temp(tree)
+        if v is not None:
+            gpu, gpu_src = v, f"LHM web · {name}"
+    if (cpu is None or gpu is None) and now - _win_cache["at"] >= _CIM_TTL_S:
+        if cpu is None:
+            v = _librehardwaremonitor_temp()
+            if v is not None:
+                cpu, cpu_src = v, "LHM WMI"
+        if gpu is None:
+            v, name = _librehardwaremonitor_gpu()
+            if v is not None:
+                gpu, gpu_src = v, f"LHM WMI · {name}"
+        if cpu is None:
+            v = _wmi_thermal_temp()
+            if v is not None:
+                cpu, cpu_src = v, "thermal zone"
+    _win_cache.update(at=now, value=cpu, gpu=gpu,
+                      cpu_source=cpu_src, gpu_source=gpu_src)
+    return {"cpu": cpu, "gpu": gpu,
+            "cpu_source": cpu_src, "gpu_source": gpu_src}
 
 
-def cpu_temp() -> float:
-    """Best-effort package temp: x86_pkg_temp > Tctl/Package > hottest."""
+def _windows_temp() -> float | None:
+    """Legacy single-value wrapper (kept for callers wanting just the CPU)."""
+    return _windows_die_temps()["cpu"]
+
+
+_GPU_HWMON_CHIPS = ("amdgpu", "radeon", "nouveau", "nvidia", "xe")
+
+
+def _hwmon_die_temps(temps: list[tuple[str, str, float]]) -> dict:
+    """Split one hwmon reading into CPU/GPU dies. GPU = hottest reading
+    off a discrete-GPU chip; an APU's amdgpu node mirrors the package,
+    which is harmless (max() semantics downstream)."""
+    cpu = cpu_src = None
+    for chip, label, t in temps:
+        if chip == "x86_pkg_temp":
+            cpu, cpu_src = t, f"hwmon {chip}"
+            break
+    if cpu is None:
+        for chip, label, t in temps:
+            if label in ("Tctl", "Tdie", "Package id 0", "TCPU", "TCPU_PCI"):
+                cpu, cpu_src = t, f"hwmon {chip} {label}".rstrip()
+                break
+    if cpu is None and temps:
+        cpu, cpu_src = max(temps, key=lambda e: e[2])[2], "hwmon hottest"
+    gpu = gpu_src = None
+    g = [(chip, label, t) for chip, label, t in temps
+         if chip.split("_")[0] in _GPU_HWMON_CHIPS]
+    if g:
+        chip, label, t = max(g, key=lambda e: e[2])
+        gpu, gpu_src = t, f"hwmon {chip} {label}".rstrip()
+    return {"cpu": cpu, "gpu": gpu,
+            "cpu_source": cpu_src if cpu is not None else None,
+            "gpu_source": gpu_src}
+
+
+def die_temps() -> dict:
+    """CPU+GPU temps: {"cpu", "gpu", "cpu_source", "gpu_source"}.
+
+    Values are None when their die has no source (no dGPU, no LHM).
+    Never raises for absent sensors — the caller treats None as "no
+    reading". Linux reads hwmon once per call (cheap sysfs); Windows
+    results are TTL-cached inside.
+    """
+    if os.name == "nt":
+        return _windows_die_temps()
     temps = read_hwmon_temps()
     if not temps:
-        # thermal zones fallback (containers / odd kernels)
+        # thermal zones fallback (containers / odd kernels): unlabeled,
+        # so they can only feed the CPU side.
         zones = []
         for z in glob.glob("/sys/class/thermal/thermal_zone*/temp"):
             try:
@@ -237,20 +385,43 @@ def cpu_temp() -> float:
                     zones.append(int(f.read().strip()) / 1000.0)
             except (OSError, ValueError):
                 pass
-        if not zones:
-            if os.name == "nt":
-                wmi_t = _windows_temp()
-                if wmi_t is not None:
-                    return wmi_t
-                raise RuntimeError(
-                    "no CPU temp on Windows: run LibreHardwareMonitor "
-                    "AS ADMINISTRATOR (non-elevated it publishes no sensors)")
-            raise RuntimeError("no temperature sensors found under /sys/class/hwmon")
-        return max(zones)
-    for chip, label, t in temps:
-        if chip == "x86_pkg_temp":
-            return t
-    for chip, label, t in temps:
-        if label in ("Tctl", "Tdie", "Package id 0", "TCPU", "TCPU_PCI"):
-            return t
-    return max(t for _, _, t in temps)
+        if zones:
+            return {"cpu": max(zones), "gpu": None,
+                    "cpu_source": "thermal zone", "gpu_source": None}
+        return {"cpu": None, "gpu": None,
+                "cpu_source": None, "gpu_source": None}
+    return _hwmon_die_temps(temps)
+
+
+def curve_temp(source: str = "max") -> float:
+    """Curve drive temperature: one die, or the hotter of both.
+
+    One fan, two heat sources — the hotter die sets the pace (same policy
+    as the backend DeviceManager). Raises RuntimeError when the selected
+    source has no reading.
+    """
+    d = die_temps()
+    if source == "cpu":
+        t = d["cpu"]
+    elif source == "gpu":
+        t = d["gpu"]
+        if t is None:
+            raise RuntimeError("no GPU temperature source (no discrete GPU sensor found)")
+    else:
+        avail = [x for x in (d["cpu"], d["gpu"]) if x is not None]
+        t = max(avail) if avail else None
+    if t is None:
+        return cpu_temp()  # re-reads; raises the platform-specific message
+    return t
+
+
+def cpu_temp() -> float:
+    """Best-effort package temp: x86_pkg_temp > Tctl/Package > hottest."""
+    d = die_temps()
+    if d["cpu"] is not None:
+        return d["cpu"]
+    if os.name == "nt":
+        raise RuntimeError(
+            "no CPU temp on Windows: run LibreHardwareMonitor "
+            "AS ADMINISTRATOR (non-elevated it publishes no sensors)")
+    raise RuntimeError("no temperature sensors found under /sys/class/hwmon")

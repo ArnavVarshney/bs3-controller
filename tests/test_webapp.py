@@ -39,11 +39,12 @@ def _post(base, path, body):
 
 
 def test_all_routes_no_hardware():
-    old_coolers, old_temp, old_cfg = H.find_coolers, sensors.cpu_temp, D.CONFIG_PATH
+    old_coolers, old_temps, old_cfg = H.find_coolers, sensors.die_temps, D.CONFIG_PATH
     tmp = tempfile.NamedTemporaryFile(delete=False)
     tmp.close()
     H.find_coolers = lambda: []
-    sensors.cpu_temp = lambda: 55.0
+    sensors.die_temps = lambda: {"cpu": 55.0, "gpu": 61.0,
+                                 "cpu_source": "test", "gpu_source": "test"}
     D.CONFIG_PATH = tmp.name
     mgr = D.DeviceManager()
     old_mgr = W.Handler.mgr
@@ -74,6 +75,9 @@ def test_all_routes_no_hardware():
         assert s["gear_names"] == ["quiet", "standard", "strong", "overclock"]
         assert s["max_rpm"] == 4000 and s["has_strip"] is True
         assert s["cpu_temp"] == 55.0
+        assert s["gpu_temp"] == 61.0
+        assert s["drive_temp"] == 61.0  # max of both dies
+        assert s["temp_source"] == "max"
 
         # hardware actions fail honestly (no cooler to drive)
         for path, body in [
@@ -91,8 +95,12 @@ def test_all_routes_no_hardware():
             assert code in (400, 500), (path, code)
             assert "cooler" in resp.get("error", ""), (path, resp)
         # curve config is link-independent: works with no hardware
-        code, _ = _post(base, "/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True})
+        code, resp = _post(base, "/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True})
         assert code == 200
+        assert resp["temp_source"] == "max"
+        code, resp = _post(base, "/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True, "source": "gpu"})
+        assert code == 200
+        assert resp["temp_source"] == "gpu"
         code, _ = _post(base, "/api/reconnect", {})
         assert code == 200
         bads = [
@@ -106,6 +114,7 @@ def test_all_routes_no_hardware():
             ("/api/rgb-upload", {"r": 999, "g": 2, "b": 3, "brightness": 50}),
             ("/api/curve", {"points": [[35, 1000]], "enabled": True}),
             ("/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": "yes"}),
+            ("/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True, "source": "lava"}),
             ("/api/gear-table", {"gears": [1, 2, 3]}),
             ("/api/gear-table", {"gears": None}),
             ("/api/nope", {}),
@@ -119,7 +128,7 @@ def test_all_routes_no_hardware():
         mgr.stop()
         W.Handler.mgr = old_mgr
         H.find_coolers = old_coolers
-        sensors.cpu_temp = old_temp
+        sensors.die_temps = old_temps
         D.CONFIG_PATH = old_cfg
         try:
             os.unlink(tmp.name)

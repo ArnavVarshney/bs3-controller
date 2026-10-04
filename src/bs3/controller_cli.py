@@ -357,12 +357,12 @@ def cmd_monitor(a) -> int:
     if a.transport == "ble":
         return asyncio.run(_ble_monitor(a))
     cv = C.Curve()
-    print("# temp -> rpm curve active (Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
+    print(f"# temp -> rpm curve active (source: {a.temp_source}; Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
     dev = None
     try:
         while True:
             try:
-                t = sensors.cpu_temp()
+                t = sensors.curve_temp(a.temp_source)
             except RuntimeError as e:
                 print(f"sensor error: {e}", file=sys.stderr)
                 time.sleep(5)
@@ -415,12 +415,12 @@ async def _ble_monitor(a) -> int:
     """BLE variant of cmd_monitor: holds one GATT link, CPU-temp curve."""
     from . import bleak_backend as B
     cv = C.Curve()
-    print("# temp -> rpm curve active (Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
+    print(f"# temp -> rpm curve active (source: {a.temp_source}; Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
     ctl: B.BleakCooler | None = None
     try:
         while True:
             try:
-                t = sensors.cpu_temp()
+                t = sensors.curve_temp(a.temp_source)
             except RuntimeError as e:
                 print(f"sensor error: {e}", file=sys.stderr)
                 await asyncio.sleep(5)
@@ -499,8 +499,10 @@ def build_parser() -> argparse.ArgumentParser:
     u.add_argument("--brightness", type=int, default=70)
     st = sub.add_parser("standby", help="what cooler does when host goes away")
     st.add_argument("mode", choices=("off", "instant", "delayed"))
-    m = sub.add_parser("monitor", help="run CPU-temp fan curve")
+    m = sub.add_parser("monitor", help="run temperature-driven fan curve")
     m.add_argument("--interval", type=float, default=4.0)
+    m.add_argument("--temp-source", choices=("max", "cpu", "gpu"), default="max",
+                   help="which die drives the curve (default: hotter of both)")
     return p
 
 

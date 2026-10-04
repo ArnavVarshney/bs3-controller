@@ -94,7 +94,11 @@ class BackendDevice {
   async setEffect(effect) { return this._post("/api/effect", { effect }); }
   async uploadColor(r, g, b, brightness) { return this._post("/api/rgb-upload", { r, g, b, brightness }); }
   async setStandby(mode) { return this._post("/api/standby", { mode }); }
-  async setCurve(points, enabled) { return this._post("/api/curve", { points, enabled: !!enabled }); }
+  async setCurve(points, enabled, source) {
+    const body = { points, enabled: !!enabled };
+    if (source) body.source = source;
+    return this._post("/api/curve", body);
+  }
   async setGearTable(gears) { return this._post("/api/gear-table", { gears }); }
   async reconnect() { return this._post("/api/reconnect", {}); }
   async close() { /* nothing to hold */ }
@@ -229,9 +233,9 @@ class DirectDevice {
     return { standby: mode };
   }
 
-  async setCurve(points, _enabled) {
+  async setCurve(points, _enabled, _source) {
     // Browsers expose no CPU-temp API: persist the edit for the backend,
-    // but automation itself stays backend-only.
+    // but automation itself stays backend-only (source selection included).
     this.curve = points.map((p) => [Number(p[0]), Number(p[1])]);
     saveCurve(this.curve);
     return { curve: this.curve, auto_curve: false, note: "Temperature automation needs the BS3 backend app." };

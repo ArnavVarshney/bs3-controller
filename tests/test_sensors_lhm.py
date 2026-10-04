@@ -86,3 +86,92 @@ def test_http_none_when_no_server(monkeypatch):
     monkeypatch.setenv("BS3_LHM_PORT", "9")  # dead port, nothing listens
     S._win_cache.update(at=0.0, value=None)
     assert S._lhm_http_temp() is None
+
+
+def test_gpu_hotspot_picked():
+    v, name = S._find_gpu_temp(TREE)
+    assert (v, name) == (96.0, "GPU Hot Spot")
+
+
+def test_gpu_ignores_cpu_clocks_and_load():
+    # no GPU hardware at all: CPU temps must not leak into the GPU picker
+    assert S._find_gpu_temp({"Text": "r", "Children": [
+        {"Text": "AMD Ryzen", "Children": [
+            {"Text": "Temperatures", "Children": [
+                {"Text": "Core (Tctl/Tdie)", "Value": "67.5 °C", "Children": []},
+            ]},
+            {"Text": "Clocks", "Children": [
+                {"Text": "Core #1", "Value": "45.0 MHz", "Children": []},
+            ]},
+        ]},
+    ]}) == (None, None)
+    assert S._find_gpu_temp({}) == (None, None)
+
+
+def test_apu_heat_stays_with_cpu():
+    # "with Radeon Graphics" is the CPU die (same heat) — not a dGPU.
+    tree = {"Text": "r", "Children": [
+        {"Text": "AMD Ryzen 7 5800H with Radeon Graphics", "Children": [
+            {"Text": "Temperatures", "Children": [
+                {"Text": "Core (Tctl/Tdie)", "Value": "71.0 °C", "Children": []},
+                {"Text": "GFX", "Value": "69.0 °C", "Children": []},
+            ]},
+        ]},
+    ]}
+    assert S._find_gpu_temp(tree) == (None, None)
+    assert S._find_cpu_temp(tree) == 71.0
+
+
+def test_gpu_prefers_hotspot_over_core():
+    tree = {"Text": "r", "Children": [
+        {"Text": "NVIDIA GeForce RTX 4060", "Children": [
+            {"Text": "Temperatures", "Children": [
+                {"Text": "GPU Core", "Value": "58.0 °C", "Children": []},
+                {"Text": "GPU Hot Spot", "Value": "66.5 °C", "Children": []},
+            ]},
+        ]},
+    ]}
+    assert S._find_gpu_temp(tree) == (66.5, "GPU Hot Spot")
+
+
+def test_windows_die_temps_from_tree(monkeypatch):
+    monkeypatch.setattr(S, "_lhm_http_tree", lambda port: TREE)
+    monkeypatch.setattr(S, "_cim_query", lambda ns, classname: [])
+    S._win_cache.update(at=0.0, value=None, gpu=None,
+                        cpu_source=None, gpu_source=None)
+    d = S._windows_die_temps()
+    assert d["cpu"] == 67.5 and d["gpu"] == 96.0
+    assert d["cpu_source"] == "LHM web · Core (Tctl/Tdie)"
+    assert d["gpu_source"] == "LHM web · GPU Hot Spot"
+
+
+def test_hwmon_die_split(monkeypatch):
+    monkeypatch.setattr(S, "read_hwmon_temps", lambda: [
+        ("k10temp", "Tctl", 52.0),
+        ("amdgpu", "edge", 48.0),
+        ("amdgpu", "junction", 61.0),
+    ])
+    d = S._hwmon_die_temps(S.read_hwmon_temps())
+    assert (d["cpu"], d["gpu"]) == (52.0, 61.0)  # hottest amdgpu reading
+    assert d["cpu_source"] == "hwmon k10temp Tctl"
+
+
+def test_curve_temp_policy(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(S, "die_temps", lambda: {
+        "cpu": 55.0, "gpu": 72.5, "cpu_source": "t", "gpu_source": "t"})
+    assert S.curve_temp() == 72.5
+    assert S.curve_temp("cpu") == 55.0
+    assert S.curve_temp("gpu") == 72.5
+    monkeypatch.setattr(S, "die_temps", lambda: {
+        "cpu": 55.0, "gpu": None, "cpu_source": "t", "gpu_source": None})
+    assert S.curve_temp() == 55.0
+    with pytest.raises(RuntimeError, match="no GPU temperature source"):
+        S.curve_temp("gpu")
+    monkeypatch.setattr(S, "die_temps", lambda: {
+        "cpu": None, "gpu": None, "cpu_source": None, "gpu_source": None})
+    monkeypatch.setattr(S, "cpu_temp", lambda: (_ for _ in ()).throw(
+        RuntimeError("no temperature sensors found under /sys/class/hwmon")))
+    with pytest.raises(RuntimeError, match="no temperature sensors"):
+        S.curve_temp()
