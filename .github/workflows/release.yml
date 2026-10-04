@@ -14,7 +14,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -e .[ble]
+      - run: pip install -e .[ble,tray]
       - run: pip install pyinstaller
       - run: pyinstaller packaging\bs3-web.spec --noconfirm
       - name: Stage LibreHardwareMonitor

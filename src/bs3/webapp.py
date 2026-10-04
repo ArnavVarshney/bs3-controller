@@ -272,6 +272,8 @@ def main(argv=None) -> int:
     ap.add_argument("--address", default="auto", help="BLE address for --transport ble (default: first FlyDigi BS found)")
     ap.add_argument("--lhm", nargs="?", const="auto", default=None, metavar="PATH",
                     help="ensure LibreHardwareMonitor runs (Windows CPU temps), started minimized; optional exe path (default: alongside the backend)")
+    ap.add_argument("--tray", action="store_true",
+                    help="Windows tray icon (needs .[tray]): live tooltip, dashboard/reconnect/quit menu")
     a = ap.parse_args(argv)
     from . import singleton
     if not singleton.acquire("BS3Link"):
@@ -283,6 +285,24 @@ def main(argv=None) -> int:
     Handler.mgr = mgr
     srv = ThreadingHTTPServer(("127.0.0.1", a.port), Handler)
     print(f"bs3-web {__version__} on http://127.0.0.1:{a.port}  (Ctrl-C stops, localhost only — no auth)")
+    if a.tray:
+        try:
+            from . import tray as T
+        except ImportError:
+            print("bs3-web: --tray needs the tray extra: pip install -e .[tray]",
+                  file=sys.stderr)
+            mgr.stop()
+            return 2
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        try:
+            T.run_tray(lambda: _tray_status(mgr),
+                       lambda: _open_dashboard(a.port),
+                       mgr.reconnect, srv.shutdown)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            mgr.stop()
+        return 0
     try:
         srv.serve_forever()
     except KeyboardInterrupt:
@@ -290,6 +310,32 @@ def main(argv=None) -> int:
     finally:
         mgr.stop()
     return 0
+
+
+def _tray_status(mgr: DeviceManager) -> str:
+    """One tooltip line for the tray icon (Windows truncates past ~127 chars)."""
+    try:
+        s = mgr.snapshot()
+    except Exception:
+        return "starting…"
+    st = s.get("status")
+    if not st:
+        return s.get("error") or "no cooler"
+    line = f"{st.get('current_rpm', 0)} rpm"
+    if s.get("cpu_temp") is not None:
+        line += f" · CPU {s['cpu_temp']:.1f}°"
+    if s.get("gpu_temp") is not None:
+        line += f" · GPU {s['gpu_temp']:.1f}°"
+    return line
+
+
+def _open_dashboard(port: int) -> None:
+    import webbrowser
+
+    try:
+        webbrowser.open(f"http://127.0.0.1:{port}/")
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ from . import sensors
 
 import logging
 
+from . import __version__
+
 log = logging.getLogger("bs3")
 
 CONFIG_PATH = os.path.expanduser("~/.config/bs3-controller/config.json")
@@ -538,6 +540,7 @@ class DeviceManager:
                 "auto_curve": self.auto_curve,
                 "history": list(self.history),
                 "effects": [{"id": k, "name": v} for k, v in R.EFFECT_NAMES.items()],
+                "backend": {"version": __version__, "transport": self.transport},
             }
 
     def stop(self):
