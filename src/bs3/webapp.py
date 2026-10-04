@@ -190,6 +190,20 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/reconnect":
                 m.reconnect()
                 out = {"ok": True}
+            elif path == "/api/logs":
+                # support bundle: tail of the backend log (windowed mode);
+                # console mode logs to the terminal instead (no file).
+                lp = _log_path()
+                if lp is None:
+                    return _send_json(self, {"error": "no log file yet (console mode logs to the terminal)"}, 404)
+                try:
+                    with open(lp, "rb") as f:
+                        f.seek(0, os.SEEK_END)
+                        f.seek(max(0, f.tell() - 65536))
+                        tail = f.read().decode("utf-8", "replace").splitlines()[-200:]
+                except OSError as e:
+                    return _send_json(self, {"error": str(e)}, 500)
+                return _send_json(self, {"lines": tail})
             else:
                 return _send_json(self, {"error": "unknown endpoint"}, 404)
             out = dict(out)
@@ -199,6 +213,16 @@ class Handler(BaseHTTPRequestHandler):
             return _send_json(self, {"error": str(e)}, 400)
         except Exception as e:  # device timeouts etc.
             return _send_json(self, {"error": str(e)}, 500)
+
+
+def _log_path() -> str | None:
+    """Windowed-backend log file (None when never created)."""
+    try:
+        p = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")),
+                         "BS3 Controller", "bs3-web.log")
+    except OSError:
+        return None
+    return p if os.path.isfile(p) else None
 
 
 def _setup_headless_log() -> None:

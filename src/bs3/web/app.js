@@ -87,6 +87,12 @@ function render(s) {
   setText("tRpm", st.target_rpm + " rpm");
   setText("cpu", s.cpu_temp == null ? "–" : s.cpu_temp.toFixed(1) + "°C");
   setText("gpu", s.gpu_temp == null ? "–" : s.gpu_temp.toFixed(1) + "°C");
+  if (s.backend) {
+    setText("sysBackend", "v" + (s.backend.version || "?"));
+    setText("sysLink", s.backend.transport || "?");
+    setText("sysCpuSrc", (s.temp_sources && s.temp_sources.cpu) || "none");
+    setText("sysGpuSrc", (s.temp_sources && s.temp_sources.gpu) || "none");
+  }
   setText("mode", st.mode + (st.realtime ? " (override)" : ""));
   setText("supply", st.supply_name + " (" + st.rpm_ceiling + " cap)");
   setText("chipGear", "gear " + st.gear + " → " + st.effective_gear);
@@ -377,6 +383,17 @@ function wire() {
   $("tempSrc").onchange = async () => {
     try { await post("/api/curve", { points: localCurve, enabled: $("curveOn").checked, source: $("tempSrc").value }); }
     catch (e) { showErr(e.message); }
+  };
+  $("btnLogs").onclick = async () => {
+    try {
+      const j = await post("/api/logs", {});
+      const blob = new Blob([(j.lines || []).join("\n")], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "bs3-web.log";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { showErr(e.message); }
   };
   $("stripOn").onchange = async () => { try { await post("/api/strip", { on: $("stripOn").checked }); } catch (e) { showErr(e.message); } };
   $("gearLedOn").onchange = async () => { try { await post("/api/gear-led", { on: $("gearLedOn").checked }); } catch (e) { showErr(e.message); } };

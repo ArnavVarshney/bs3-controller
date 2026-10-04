@@ -68,15 +68,27 @@ class BackendDevice {
     this.base = base.replace(/\/$/, "");
   }
 
+  async _fetch(url, opts, timeoutMs = 8000) {
+    // Hung requests must never wedge the 1s poll loop (polling flag):
+    // time out, surface the error, next tick retries.
+    const ctl = new AbortController();
+    const t = setTimeout(() => ctl.abort(), timeoutMs);
+    try {
+      return await fetch(url, { ...(opts || {}), signal: ctl.signal });
+    } finally {
+      clearTimeout(t);
+    }
+  }
+
   async _get(path) {
-    const r = await fetch(this.base + path, { cache: "no-store" });
+    const r = await this._fetch(this.base + path, { cache: "no-store" });
     const j = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(j.error || ("HTTP " + r.status));
     return j;
   }
 
   async _post(path, body) {
-    const r = await fetch(this.base + path, {
+    const r = await this._fetch(this.base + path, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body || {}),
     });
@@ -99,6 +111,7 @@ class BackendDevice {
     if (source) body.source = source;
     return this._post("/api/curve", body);
   }
+  async logs() { return this._post("/api/logs", {}); }
   async setGearTable(gears) { return this._post("/api/gear-table", { gears }); }
   async reconnect() { return this._post("/api/reconnect", {}); }
   async close() { /* nothing to hold */ }

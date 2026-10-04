@@ -183,6 +183,13 @@ function render(s) {
   setText("tRpm", st.target_rpm + " rpm");
   setText("cpu", s.cpu_temp == null ? "–" : s.cpu_temp.toFixed(1) + "°C");
   setText("gpu", s.gpu_temp == null ? "–" : s.gpu_temp.toFixed(1) + "°C");
+  $("sysCard").hidden = !s.backend;
+  if (s.backend) {
+    setText("sysBackend", "v" + (s.backend.version || "?"));
+    setText("sysLink", s.backend.transport || "?");
+    setText("sysCpuSrc", (s.temp_sources && s.temp_sources.cpu) || "none");
+    setText("sysGpuSrc", (s.temp_sources && s.temp_sources.gpu) || "none");
+  }
   setText("mode", st.mode + (st.realtime ? " (override)" : ""));
   setText("supply", st.supply_name + " (" + st.rpm_ceiling + " cap)");
   setText("chipGear", "gear " + st.gear + " → " + st.effective_gear);
@@ -473,6 +480,18 @@ function wire() {
   $("tempSrc").onchange = async () => {
     try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked, $("tempSrc").value); }
     catch (e) { showErr(e.message); }
+  };
+  $("btnLogs").onclick = async () => {
+    if (!DEV || !DEV.logs) { showErr("Log download needs the backend."); return; }
+    try {
+      const j = await callAction(DEV.logs);
+      const blob = new Blob([(j.lines || []).join("\n")], { type: "text/plain" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "bs3-web.log";
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    } catch (e) { showErr(e.message); }
   };
   $("stripOn").onchange = async () => { try { await callAction(DEV.setStrip, $("stripOn").checked); } catch (e) { showErr(e.message); } };
   $("gearLedOn").onchange = async () => { try { await callAction(DEV.setGearLed, $("gearLedOn").checked); } catch (e) { showErr(e.message); } };

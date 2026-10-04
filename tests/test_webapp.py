@@ -39,7 +39,8 @@ def _post(base, path, body):
 
 
 def test_all_routes_no_hardware():
-    old_coolers, old_temps, old_cfg = H.find_coolers, sensors.die_temps, D.CONFIG_PATH
+    old_coolers, old_temps, old_cfg, old_logpath = (
+        H.find_coolers, sensors.die_temps, D.CONFIG_PATH, W._log_path)
     tmp = tempfile.NamedTemporaryFile(delete=False)
     tmp.close()
     H.find_coolers = lambda: []
@@ -78,6 +79,8 @@ def test_all_routes_no_hardware():
         assert s["gpu_temp"] == 61.0
         assert s["drive_temp"] == 61.0  # max of both dies
         assert s["temp_source"] == "max"
+        assert s["backend"]["transport"] == "hid"
+        assert s["backend"]["version"]
 
         # hardware actions fail honestly (no cooler to drive)
         for path, body in [
@@ -103,6 +106,23 @@ def test_all_routes_no_hardware():
         assert resp["temp_source"] == "gpu"
         code, _ = _post(base, "/api/reconnect", {})
         assert code == 200
+        # support bundle: missing log file -> honest 404 ...
+        W._log_path = lambda: None
+        code, resp = _post(base, "/api/logs", {})
+        assert code == 404
+        # ... and a real file returns its tail
+        log_tmp = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".log")
+        log_tmp.write("a\nb\nc\n")
+        log_tmp.close()
+        try:
+            W._log_path = lambda: log_tmp.name
+            code, resp = _post(base, "/api/logs", {})
+            assert code == 200 and resp["lines"] == ["a", "b", "c"]
+        finally:
+            try:
+                os.unlink(log_tmp.name)
+            except OSError:
+                pass
         bads = [
             ("/api/rpm", {}),
             ("/api/rpm", {"rpm": "2600"}),
@@ -130,6 +150,7 @@ def test_all_routes_no_hardware():
         H.find_coolers = old_coolers
         sensors.die_temps = old_temps
         D.CONFIG_PATH = old_cfg
+        W._log_path = old_logpath
         try:
             os.unlink(tmp.name)
         except OSError:

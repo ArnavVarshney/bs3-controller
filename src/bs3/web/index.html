@@ -79,6 +79,17 @@
     <div class="row"><button id="btnGears">Save gears</button>
       <select id="standby"><option value="off">standby: off</option><option value="instant">standby: instant</option><option value="delayed">standby: delayed</option></select></div>
   </section>
+
+  <section class="card" id="sysCard">
+    <h2>System</h2>
+    <div class="statCol">
+      <div><label>Backend</label><b id="sysBackend">–</b></div>
+      <div><label>Link</label><b id="sysLink">–</b></div>
+      <div><label>CPU sensor</label><b id="sysCpuSrc">–</b></div>
+      <div><label>GPU sensor</label><b id="sysGpuSrc">–</b></div>
+    </div>
+    <div class="row"><button id="btnLogs" class="ghost">Download logs</button></div>
+  </section>
 </main>
 
 <footer class="muted">BS3 Controller v0.2.0 · Local dashboard. No account, no cloud.</footer>
