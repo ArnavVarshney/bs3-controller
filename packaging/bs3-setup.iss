@@ -55,7 +55,7 @@ Name: "{group}\Uninstall BS3 Controller"; Filename: "{uninstallexe}"
 Name: "backend_autostart"; Description: "Start the BS3 backend silently when I log in (tray icon; recommended)"; GroupDescription: "Startup:"; Flags: exclusive unchecked
 Name: "backend_console_autostart"; Description: "Start the BS3 backend with a visible window when I log in"; GroupDescription: "Startup:"; Flags: exclusive unchecked
 Name: "no_autostart"; Description: "Do not start anything at login"; GroupDescription: "Startup:"; Flags: exclusive unchecked
-Name: "lhm_elevated"; Description: "Run LibreHardwareMonitor elevated at login (required for CPU temps; consent once, starts minimized after)"; Flags: uncheckedonce
+Name: "lhm_elevated"; Description: "Run LibreHardwareMonitor elevated at login (required for CPU temps; consent once, starts minimized after)"; Flags: unchecked
 
 [Registry]
 Root: HKLM; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "BS3Web"; ValueData: """{app}\bs3-webw.exe"" --transport ble --lhm --tray"; Tasks: backend_autostart; Flags: uninsdeletevalue
