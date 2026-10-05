@@ -60,3 +60,44 @@ def test_update_panic_bypasses_deadband():
     assert changed and want == 4000
     want, _ = cv.update(95.0, supply=3, model="BS3")
     assert want == 3400
+
+
+def test_down_hysteresis_holds_small_dips():
+    cv = C.Curve()
+    high, changed = cv.update(65.0)
+    assert changed
+    # 1C dip wants less, but inside 2C hysteresis: hold
+    for _ in range(10):
+        want, changed = cv.update(64.0)
+        assert not changed and want == high
+    # sustained 3C drop clears hysteresis: step down sent
+    saw = False
+    for _ in range(60):
+        want, changed = cv.update(62.0)
+        if changed and want < high:
+            saw = True
+            break
+    assert saw
+
+
+def test_up_step_ignores_hysteresis():
+    cv = C.Curve()
+    base, _ = cv.update(60.0)
+    # heat jumps past deadband: sent immediately, no waiting for anything
+    want, changed = cv.update(70.0)
+    assert changed and want > base
+    for _ in range(30):  # let the smoother settle at the new level
+        want, _ = cv.update(70.0)
+    base = want
+    # 2C dip: deadband alone would send, hysteresis holds
+    for _ in range(15):
+        want, changed = cv.update(68.0)
+        assert not changed and want == base
+    # genuinely cooler: step down sent
+    saw = False
+    for _ in range(60):
+        want, changed = cv.update(65.0)
+        if changed and want < base:
+            saw = True
+            break
+    assert saw
