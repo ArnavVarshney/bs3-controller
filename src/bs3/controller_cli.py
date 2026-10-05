@@ -84,7 +84,7 @@ def _ble_list(a) -> int:
 
     pads = asyncio.run(go())
     if not pads:
-        print("no FlyDigi BS pads advertising (powered + unconnected?)")
+        print("no FlyDigi BS pads advertising (power it on; if paired in OS Bluetooth settings, remove it there)")
         return 1
     for p in pads:
         print(f"{p['address']}  {p['model']}  ble  ({p['name']})")

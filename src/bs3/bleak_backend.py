@@ -69,7 +69,7 @@ class BleakCooler:
         if addr.lower() == "auto":
             pads = await find_pads()
             if not pads:
-                raise RuntimeError("no FlyDigi BS pad advertising (is it powered + unconnected?)")
+                raise RuntimeError("no FlyDigi BS pad advertising (power it on; if paired in OS Bluetooth settings, remove it there — a paired OS holds the single BLE link)")
             addr = pads[0]["address"]
             self.name = pads[0]["name"]
             self.model = pads[0]["model"]

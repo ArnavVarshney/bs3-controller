@@ -111,6 +111,9 @@ class BackendDevice {
     if (source) body.source = source;
     return this._post("/api/curve", body);
   }
+  async sensors(cpu_sensor, gpu_sensor) {
+    return this._post("/api/sensors", { cpu_sensor: cpu_sensor || null, gpu_sensor: gpu_sensor || null });
+  }
   async logs() { return this._post("/api/logs", {}); }
   async setGearTable(gears) { return this._post("/api/gear-table", { gears }); }
   async reconnect() { return this._post("/api/reconnect", {}); }

@@ -182,7 +182,7 @@ class DeviceManager:
             if addr.lower() == "auto":
                 pads = self._run_ble(B.find_pads(), timeout=15.0)
                 if not pads:
-                    raise RuntimeError("No Flydigi pad advertising — is it powered on and not connected elsewhere?")
+                    raise RuntimeError("No Flydigi pad advertising — power it on, and if it's paired in your OS Bluetooth settings, remove it there (a paired OS holds the single BLE link).")
                 addr = pads[0]["address"]
             ctl = B.BleakCooler(addr)
             self._run_ble(ctl.connect(), timeout=20.0)

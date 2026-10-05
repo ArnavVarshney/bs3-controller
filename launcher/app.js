@@ -168,8 +168,18 @@ function render(s) {
   if (document.hidden) return; // data cached in SNAP; DOM catches up when visible
   const st = s.status;
   $("dot").className = "dot " + (!st ? "bad" : "ok");
+  // host-side controls stay live with no cooler (sensors are local)
+  fillSensorSel($("cpuSensor"), s.sensors || [], s.cpu_sensor);
+  fillSensorSel($("gpuSensor"), s.sensors || [], s.gpu_sensor);
   if (!st) {
     setText("model", "No cooler");
+    $("sysCard").hidden = !s.backend;
+    if (s.backend) {
+      setText("sysBackend", "v" + (s.backend.version || "?"));
+      setText("sysLink", s.backend.transport || "?");
+    }
+    setText("sysCpuSrc", (s.temp_sources && s.temp_sources.cpu) || "none");
+    setText("sysGpuSrc", (s.temp_sources && s.temp_sources.gpu) || "none");
     return;
   }
   setText("model", (s.model || "?") + " · fw " + (s.fw || "?"));
@@ -206,6 +216,17 @@ function render(s) {
   if (document.activeElement !== $("rpm")) { $("rpm").value = st.target_rpm; setText("rpmVal", st.target_rpm); }
   if (!$("curveOn").matches(":focus")) $("curveOn").checked = !!s.auto_curve;
   if (document.activeElement !== $("tempSrc")) $("tempSrc").value = s.temp_source || "max";
+  // supply-aware honesty: points above the live cap clamp silently in
+  // clamp_rpm() — say so instead of letting the curve lie.
+  {
+    const cap = Math.min(s.max_rpm || FALLBACK_MAX, (st.rpm_ceiling != null ? st.rpm_ceiling : FALLBACK_MAX));
+    const top = localCurve.reduce((m, p) => Math.max(m, p[1]), 0);
+    const warn = $("curveCapWarn");
+    if (top > cap) {
+      warn.hidden = false;
+      warn.textContent = "Curve asks " + top + " rpm but this link caps at " + cap + " rpm (" + st.supply_name + " supply) — above-cap points clamp.";
+    } else warn.hidden = true;
+  }
   // Browser-direct has no CPU-temp automation: keep the toggle visible but inert.
   $("curveOn").disabled = TRANSPORT !== "Backend";
   $("curveOn").title = TRANSPORT === "Backend" ? "" : "Temperature automation runs in the BS3 backend app.";
@@ -253,6 +274,34 @@ function render(s) {
   const hist = s.history || [];
   const hsig = hist.length + ":" + (hist.length ? hist[hist.length - 1].t : 0);
   if (hsig !== drawnHistSig) { drawHist(hist); drawnHistSig = hsig; }
+}
+
+/* Sensor picker: Auto + every live sensor (value in the label so a
+ * stale pick is visible). Rebuilt only when the ID set changes. */
+function fillSensorSel(sel, sensors, current) {
+  const sig = sensors.map((s) => s.id).join("|") + "||" + (current || "");
+  if (sel._sig === sig) { if (sel.value !== (current || "")) sel.value = current || ""; return; }
+  sel._sig = sig;
+  sel.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = "Auto";
+  sel.appendChild(auto);
+  for (const s of sensors) {
+    const o = document.createElement("option");
+    o.value = s.id;
+    o.textContent = s.chip + " " + s.label + " (" + Number(s.value).toFixed(0) + "°)";
+    sel.appendChild(o);
+  }
+  sel.value = current || "";
+  if (sel.value !== (current || "")) {
+    // saved ID vanished (LHM stopped, enclosure gone): show it, don't drop it
+    const o = document.createElement("option");
+    o.value = current;
+    o.textContent = current + " (missing — Auto fallback)";
+    sel.appendChild(o);
+    sel.value = current;
+  }
 }
 
 function buildGearBtns(names) {
@@ -481,6 +530,30 @@ function wire() {
     try { await callAction(DEV.setCurve, localCurve, $("curveOn").checked, $("tempSrc").value); }
     catch (e) { showErr(e.message); }
   };
+  const sendSensors = async () => {
+    if (!DEV || !DEV.sensors) return; // browser-direct exposes no host sensors
+    try {
+      await callAction(DEV.sensors,
+        $("cpuSensor").value || null, $("gpuSensor").value || null);
+    } catch (e) { showErr(e.message); }
+  };
+  $("cpuSensor").onchange = sendSensors;
+  $("gpuSensor").onchange = sendSensors;
+  $("btnHist").onclick = () => {
+    const h = (SNAP && SNAP.history) || [];
+    if (!h.length) { showErr("no history yet"); return; }
+    const rows = ["t_iso,temp_c,cpu_c,gpu_c,rpm,target_rpm"];
+    for (const p of h) {
+      const num = (v) => (v == null ? "" : Number(v));
+      rows.push([new Date(p.t * 1000).toISOString(), num(p.temp), num(p.cpu), num(p.gpu), num(p.rpm), num(p.target)].join(","));
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "bs3-history.csv";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  };
   $("btnLogs").onclick = async () => {
     if (!DEV || !DEV.logs) { showErr("Log download needs the backend."); return; }
     try {
@@ -513,6 +586,11 @@ function wire() {
 
 wire();
 drawCurve();
+// never an empty dropdown: first backend render fills live sensors
+for (const id of ["cpuSensor", "gpuSensor"]) {
+  const sel = $(id);
+  if (sel && !sel.options.length) sel.innerHTML = "<option value=''>Auto</option>";
+}
 (async () => {
   // Auto-connect to the backend when it runs nearby; USB/Bluetooth on demand.
   await useBackend();
