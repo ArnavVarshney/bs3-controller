@@ -11,7 +11,7 @@ classifiers = [
   "Environment :: Console",
   "Intended Audience :: End Users/Desktop",
   "License :: OSI Approved :: MIT License",
-  "Operating System :: POSIX :: Linux",
+  "Operating System :: OS Independent",
   "Programming Language :: Python :: 3",
   "Topic :: System :: Hardware",
 ]
@@ -22,7 +22,7 @@ dependencies = [
 gatt = ["dbus-next>=2.4"]  # only for --transport gatt (unpaired BLE via BlueZ)
 ble = ["bleak>=1.0"]  # for --transport ble (BLE GATT anywhere: Windows/macOS/Linux)
 tray = ["pystray>=0.19", "pillow>=10"]  # for bs3-web --tray (Windows tray icon)
-dev = ["pytest"]
+dev = ["pytest", "pillow>=10"]  # pillow: test_tray builds the icon (pystray itself is stubbed)
 
 [project.scripts]
 bs3ctl = "bs3.controller_cli:main"
@@ -34,3 +34,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Dashboard static files MUST ship: bs3-web serves src/bs3/web/ at runtime.
+# Without this, wheels/sdists omit them and a pip install 404s on "/".
+[tool.setuptools.package-data]
+bs3 = ["web/*"]

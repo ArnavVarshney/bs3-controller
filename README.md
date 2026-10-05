@@ -47,7 +47,7 @@ Linux (all features):
 ```bash
 cd bs3-controller
 python3 -m venv .venv && source .venv/bin/activate
-pip install -e .          # .[ble] for --transport ble, .[gatt] for BlueZ D-Bus
+pip install -e .          # .[ble] for --transport ble, .[gatt] for BlueZ D-Bus, .[tray] for --tray
 
 # rootless hidraw access (rule order matters: must sort before 73-seat-late):
 sudo cp udev/70-flydigi-cooler.rules /etc/udev/rules.d/

@@ -65,10 +65,11 @@ def run_tray(status_fn, on_open, on_reconnect, on_quit):
             threading.Event().wait(2.0)
 
     menu = pystray.Menu(
-        pystray.MenuItem("Open dashboard", lambda: on_open()),
-        pystray.MenuItem("Reconnect cooler", lambda: on_reconnect()),
+        # pystray invokes callbacks as callback(icon, item) — zero-arg lambdas die here
+        pystray.MenuItem("Open dashboard", lambda icon, item: on_open()),
+        pystray.MenuItem("Reconnect cooler", lambda icon, item: on_reconnect()),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Quit", lambda: (state.update(stop=True), on_quit())),
+        pystray.MenuItem("Quit", lambda icon, item: (state.update(stop=True), on_quit())),
     )
     icon = pystray.Icon("BS3 Controller", icon_image, tooltip(), menu)
     state["icon"] = icon

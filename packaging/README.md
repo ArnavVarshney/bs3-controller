@@ -18,15 +18,17 @@
 pip install -e .[ble]
 pip install pyinstaller
 pyinstaller packaging\bs3-web.spec --noconfirm   # -> dist\*.exe
-powershell -File packaging\fetch-lhm.ps1        # -> packaging\stage\lhm\
+powershell -File packaging\fetch-lhm.ps1        # -> packaging\stage\lhm\ (pinned v0.9.6, SHA256-verified)
 # install Inno Setup 6, then:
-iscc packaging\bs3-setup.iss                    # -> dist\bs3-controller-setup-0.1.0.exe
+iscc packaging\bs3-setup.iss                    # -> dist\bs3-controller-setup-0.3.0.exe
 ```
 
 `packaging/stage/` (downloaded LHM) and `dist/`/`build/` are git-ignored;
-`fetch-lhm.ps1` picks the classic-Framework portable zip (runs on stock
-Win10/11 — the `.NET.x` zips need that runtime) and records the version in
-`stage/lhm/VERSION.txt`.
+`fetch-lhm.ps1` takes the pinned classic-Framework portable zip (runs on
+stock Win10/11 — the `.NET.x` zips need that runtime), verifies size +
+SHA256, fails fast if the upstream layout changed, and records the version
+in `stage/lhm/VERSION.txt`. Bump the pin with `$env:LHM_TAG` + the new hash
+(see the script header).
 
 ## Startup model (why three mechanisms)
 
@@ -36,14 +38,15 @@ Win10/11 — the `.NET.x` zips need that runtime) and records the version in
   logon trigger, highest privileges): LHM's manifest *requires* admin
   (Error 740 otherwise), and a non-elevated backend can never elevate it
   silently — so the elevated installer creates this task once (consent at
-  install), and it runs elevated at every login with no prompt. The
-  backend's `--lhm` is best-effort fallback only.
-- The installer offers all of these as opt-in tasks; uninstall removes the
-  Run values and deletes the scheduled task.
+  install), and it runs elevated at every login with no prompt, starting
+  minimized (schtasks cannot set the Hidden flag; `start /min` is used).
+  The backend's `--lhm` is best-effort fallback only.
+- The installer offers all of these as opt-in tasks (unchecked by default);
+  uninstall removes the Run values and deletes the scheduled task.
 
 ## Releases
 
-Push a tag (`git tag v0.2.0; git push origin v0.2.0`) — `.github/workflows/release.yml`
+Push a tag (`git tag v0.3.0; git push origin v0.3.0`) — `.github/workflows/release.yml`
 rebuilds everything on `windows-latest`, compiles the installer with the tag
 as `AppVersion`, and attaches installer + exes to the GitHub Release.
 

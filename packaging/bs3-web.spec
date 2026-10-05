@@ -1,13 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller build for the Windows executables.
 
-Two one-file console exes (bs3-web.exe, bs3ctl.exe) with the dashboard
-static files bundled. Run from the repo root:
+Three one-file exes: bs3-web.exe (console backend), bs3-webw.exe (same,
+windowless, for autostart), bs3ctl.exe (CLI only — no dashboard files).
+Run from the repo root:
 
     pip install pyinstaller
     pyinstaller packaging\\bs3-web.spec
 
-Output: dist\\bs3-web.exe, dist\\bs3ctl.exe
+Output: dist\\bs3-web.exe, dist\\bs3-webw.exe, dist\\bs3ctl.exe
 """
 import os
 
@@ -34,12 +35,11 @@ a_cli = Analysis(
     [os.path.join(PKG, "bs3ctl_shim.py")],
     pathex=[SRC, PKG],
     binaries=[],
-    datas=web_datas,
-    hiddenimports=["bleak", "bleak.backends.winrt",
-                   "pystray", "PIL", "PIL.Image", "PIL.ImageDraw"],
+    datas=[],
+    hiddenimports=["bleak", "bleak.backends.winrt"],
     hookspath=[],
     runtime_hooks=[],
-    excludes=["dbus_next", "PyQt5", "PyQt6", "PySide2", "PySide6", "tkinter", "unittest"],
+    excludes=["dbus_next", "PyQt5", "PyQt6", "PySide2", "PySide6", "tkinter", "unittest", "pystray", "PIL"],
     noarchive=False,
 )
 
