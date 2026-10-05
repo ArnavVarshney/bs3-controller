@@ -58,6 +58,8 @@ class DeviceManager:
         self.gpu_temp: float | None = None
         self.temp_sources: dict = {"cpu": None, "gpu": None}
         self.temp_source = "max"  # curve input: cpu, gpu, or hotter-of-both
+        self.cpu_sensor: str | None = None  # picker pin (None = Auto)
+        self.gpu_sensor: str | None = None
         self.error: str | None = None
         self.auto_curve = False
         self.curve = C.Curve()
@@ -88,6 +90,10 @@ class DeviceManager:
             self.auto_curve = bool(cfg.get("auto_curve", False))
             if cfg.get("temp_source") in self.TEMP_SOURCES:
                 self.temp_source = cfg["temp_source"]
+            if isinstance(cfg.get("cpu_sensor"), str) or cfg.get("cpu_sensor") is None:
+                self.cpu_sensor = cfg.get("cpu_sensor")
+            if isinstance(cfg.get("gpu_sensor"), str) or cfg.get("gpu_sensor") is None:
+                self.gpu_sensor = cfg.get("gpu_sensor")
         except (OSError, ValueError, KeyError, TypeError):
             pass
 
@@ -97,7 +103,9 @@ class DeviceManager:
             with open(CONFIG_PATH, "w") as f:
                 json.dump({"curve": self.curve.points, "light": self.light,
                            "auto_curve": self.auto_curve,
-                           "temp_source": self.temp_source}, f, indent=2)
+                           "temp_source": self.temp_source,
+                           "cpu_sensor": self.cpu_sensor,
+                           "gpu_sensor": self.gpu_sensor}, f, indent=2)
         except OSError:
             pass
 
@@ -236,7 +244,7 @@ class DeviceManager:
     def _loop(self):
         while not self._stop.is_set():
             try:
-                d = sensors.die_temps()
+                d = sensors.die_temps(self.cpu_sensor, self.gpu_sensor)
             except RuntimeError:
                 d = {"cpu": None, "gpu": None,
                      "cpu_source": None, "gpu_source": None}
@@ -503,6 +511,22 @@ class DeviceManager:
             self.save_config()
             return {"curve": pts, "auto_curve": enabled, "temp_source": source}
 
+    def set_sensors(self, cpu_sensor: str | None,
+                    gpu_sensor: str | None) -> dict:
+        """Pin CPU/GPU dies to specific sensors (None = Auto heuristic).
+
+        Accepts any string: a vanished sensor falls back to Auto at read
+        time with a "(selected sensor missing)" note, so a saved ID never
+        wedges the curve when hardware/LHM changes. Link-independent."""
+        for v in (cpu_sensor, gpu_sensor):
+            if v is not None and not isinstance(v, str):
+                raise ValueError("sensor must be a string ID or null for Auto")
+        with self.lock:
+            self.cpu_sensor = cpu_sensor
+            self.gpu_sensor = gpu_sensor
+            self.save_config()
+            return {"cpu_sensor": cpu_sensor, "gpu_sensor": gpu_sensor}
+
     def set_gear_table(self, table: list[int]) -> dict:
         # 4 slots even on 3-gear models: the flash table physically holds 4
         if len(table) != 4 or not all(500 <= r <= 4000 for r in table):
@@ -519,6 +543,13 @@ class DeviceManager:
         with self.lock:
             coolers = [self.info] if self.info else []
             model = self.model_name()
+            cpu_sensor = self.cpu_sensor
+            gpu_sensor = self.gpu_sensor
+        try:
+            sensor_list = sensors.list_sensors()
+        except Exception:
+            sensor_list = []
+        with self.lock:
             return {
                 "error": self.error,
                 "coolers": coolers,
@@ -532,6 +563,9 @@ class DeviceManager:
                 "drive_temp": self._drive_temp_locked(),
                 "temp_source": self.temp_source,
                 "temp_sources": dict(self.temp_sources),
+                "cpu_sensor": cpu_sensor,
+                "gpu_sensor": gpu_sensor,
+                "sensors": sensor_list,
                 "supply": self.supply,
                 "gears": self.gears,
                 "gear_names": P.model_gears(model),

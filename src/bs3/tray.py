@@ -1,8 +1,10 @@
-"""Windows tray icon for the background backend (needs .[tray]).
+"""Tray icon for the background backend (needs .[tray]).
 
-Gives the windowless bs3-webw.exe a visible presence: tooltip shows live
-cooler/CPU state, the menu opens the dashboard, forces a reconnect, or
-quits. The icon is drawn at runtime with Pillow — no asset files.
+Gives the windowless bs3-webw.exe a visible presence on Windows; on Linux
+it prefers AppIndicator (needs the system GIR package, see README) and
+falls back to X11. Tooltip shows live cooler/CPU state, the menu opens
+the dashboard, forces a reconnect, or quits. The icon is drawn at runtime
+with Pillow — no asset files.
 """
 
 from __future__ import annotations

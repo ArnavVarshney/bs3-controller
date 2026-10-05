@@ -71,6 +71,9 @@ function render(s) {
   if (document.hidden) return; // data cached in SNAP; DOM catches up when visible
   const st = s.status;
   $("dot").className = "dot " + (!st ? "bad" : "ok");
+  // host-side controls stay live with no cooler (sensors are local)
+  fillSensorSel($("cpuSensor"), s.sensors || [], s.cpu_sensor);
+  fillSensorSel($("gpuSensor"), s.sensors || [], s.gpu_sensor);
   if (!st) {
     setText("model", "No cooler");
     return;
@@ -109,6 +112,17 @@ function render(s) {
   if (document.activeElement !== $("rpm")) { $("rpm").value = st.target_rpm; setText("rpmVal", st.target_rpm); }
   if (!$("curveOn").matches(":focus")) $("curveOn").checked = !!s.auto_curve;
   if (document.activeElement !== $("tempSrc")) $("tempSrc").value = s.temp_source || "max";
+  // supply-aware honesty: points above the live cap clamp silently in
+  // clamp_rpm() — say so instead of letting the curve lie.
+  {
+    const cap = Math.min(s.max_rpm || FALLBACK_MAX, (st.rpm_ceiling != null ? st.rpm_ceiling : FALLBACK_MAX));
+    const top = localCurve.reduce((m, p) => Math.max(m, p[1]), 0);
+    const warn = $("curveCapWarn");
+    if (top > cap) {
+      warn.hidden = false;
+      warn.textContent = "Curve asks " + top + " rpm but this link caps at " + cap + " rpm (" + st.supply_name + " supply) — above-cap points clamp.";
+    } else warn.hidden = true;
+  }
 
   // lighting reflect
   $("stripOn").checked = !!s.light.strip;
@@ -159,6 +173,34 @@ function render(s) {
   const hist = s.history || [];
   const hsig = hist.length + ":" + (hist.length ? hist[hist.length - 1].t : 0);
   if (hsig !== drawnHistSig) { drawHist(hist); drawnHistSig = hsig; }
+}
+
+/* Sensor picker: Auto + every live sensor (value in the label so a
+ * stale pick is visible). Rebuilt only when the ID set changes. */
+function fillSensorSel(sel, sensors, current) {
+  const sig = sensors.map((s) => s.id).join("|") + "||" + (current || "");
+  if (sel._sig === sig) { if (sel.value !== (current || "")) sel.value = current || ""; return; }
+  sel._sig = sig;
+  sel.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "";
+  auto.textContent = "Auto";
+  sel.appendChild(auto);
+  for (const s of sensors) {
+    const o = document.createElement("option");
+    o.value = s.id;
+    o.textContent = s.chip + " " + s.label + " (" + Number(s.value).toFixed(0) + "°)";
+    sel.appendChild(o);
+  }
+  sel.value = current || "";
+  if (sel.value !== (current || "")) {
+    // saved ID vanished (LHM stopped, enclosure gone): show it, don't drop it
+    const o = document.createElement("option");
+    o.value = current;
+    o.textContent = current + " (missing — Auto fallback)";
+    sel.appendChild(o);
+    sel.value = current;
+  }
 }
 
 function buildGearBtns(names) {
@@ -383,6 +425,28 @@ function wire() {
   $("tempSrc").onchange = async () => {
     try { await post("/api/curve", { points: localCurve, enabled: $("curveOn").checked, source: $("tempSrc").value }); }
     catch (e) { showErr(e.message); }
+  };
+  const sendSensors = async () => {
+    try {
+      await post("/api/sensors", { cpu_sensor: $("cpuSensor").value || null, gpu_sensor: $("gpuSensor").value || null });
+    } catch (e) { showErr(e.message); }
+  };
+  $("cpuSensor").onchange = sendSensors;
+  $("gpuSensor").onchange = sendSensors;
+  $("btnHist").onclick = () => {
+    const h = (SNAP && SNAP.history) || [];
+    if (!h.length) { showErr("no history yet"); return; }
+    const rows = ["t_iso,temp_c,cpu_c,gpu_c,rpm,target_rpm"];
+    for (const p of h) {
+      const num = (v) => (v == null ? "" : Number(v));
+      rows.push([new Date(p.t * 1000).toISOString(), num(p.temp), num(p.cpu), num(p.gpu), num(p.rpm), num(p.target)].join(","));
+    }
+    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "bs3-history.csv";
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   };
   $("btnLogs").onclick = async () => {
     try {

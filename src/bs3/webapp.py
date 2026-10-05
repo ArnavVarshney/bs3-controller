@@ -18,6 +18,7 @@ API:
   POST /api/rgb-upload        {r,g,b, brightness}
   POST /api/standby           {mode: off|instant|delayed}
   POST /api/curve             {points: [[temp,rpm]...], enabled: bool, source?: cpu|gpu|max}
+  POST /api/sensors           {cpu_sensor: id|null, gpu_sensor: id|null} (pin dies, null=Auto)
   POST /api/gear-table        {gears: [r0,r1,r2,r3]}
   POST /api/reconnect
 """
@@ -182,6 +183,15 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/curve":
                 out = m.set_curve(_req_list(body, "points"), _req_bool(body, "enabled", True),
                                   body.get("source", "max"))
+            elif path == "/api/sensors":
+                cpu_s = body.get("cpu_sensor")
+                gpu_s = body.get("gpu_sensor")
+                if cpu_s is not None and not isinstance(cpu_s, str):
+                    raise ValueError("cpu_sensor must be a string ID or null")
+                if gpu_s is not None and not isinstance(gpu_s, str):
+                    raise ValueError("gpu_sensor must be a string ID or null")
+                # empty string from a select = Auto
+                out = m.set_sensors(cpu_s or None, gpu_s or None)
             elif path == "/api/gear-table":
                 gears = _req_list(body, "gears")
                 if len(gears) != 4 or any(isinstance(x, bool) or not isinstance(x, int) for x in gears):

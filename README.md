@@ -70,6 +70,8 @@ bs3ctl gears        # stored table + supply gating
 bs3ctl set-gear-rpm quiet 1500
 bs3ctl standby delayed
 bs3ctl monitor --interval 4   # temp fan curve until Ctrl-C (hotter of CPU/GPU; --temp-source cpu|gpu|max)
+bs3ctl sensors              # list selectable temp sensors (IDs for pins below)
+bs3ctl monitor --cpu-sensor hwmon:k10temp:Tctl --gpu-sensor hwmon:amdgpu:edge
 ```
 
 ```bash
@@ -77,8 +79,22 @@ bs3-web                       # http://127.0.0.1:8765
 bs3-web --port 8080           # custom port, still localhost-only
 bs3-web --transport ble       # BLE GATT via bleak (needs .[ble])
 bs3-web --transport ble --address DC:7F:64:2B:F0:FE   # skip the scan
-bs3-web --tray                # Windows tray icon: live tooltip, dashboard/reconnect/quit (needs .[tray])
+bs3-web --tray                # tray icon: live tooltip, dashboard/reconnect/quit (needs .[tray])
 ```
+
+### Sensors (selectable)
+
+Auto-pick no longer the only option. The Temp-curve card has CPU-sensor
+and GPU-sensor dropdowns (Auto + every live sensor); the drive switch
+(hotter/CPU/GPU) stays. Pins persist in `config.json` (`cpu_sensor`,
+`gpu_sensor`); a vanished sensor falls back to Auto with a
+"(selected sensor missing)" note instead of wedging the curve.
+`GET /api/status` carries the live `sensors` list; `POST /api/sensors`
+sets `{cpu_sensor, gpu_sensor}` (null = Auto).
+
+Curve honesty: points above the live link cap (supply × model ceiling)
+clamp silently in firmware — the curve card now warns instead of lying.
+History CSV exports the ring client-side (Status card button, no backend).
 
 ### HTTP API
 
@@ -94,6 +110,7 @@ bs3-web --tray                # Windows tray icon: live tooltip, dashboard/recon
 | POST | `/api/rgb-upload` | `{r, g, b, brightness}` |
 | POST | `/api/standby` | `{mode: off\|instant\|delayed}` |
 | POST | `/api/curve` | `{points: [[temp, rpm]…] (2–8 pts), enabled, source?: cpu\|gpu\|max}` |
+| POST | `/api/sensors` | `{cpu_sensor: id\|null, gpu_sensor: id\|null}` (pin dies, null=Auto) |
 | POST | `/api/logs` | last 200 lines of the backend log (windowed mode) |
 | POST | `/api/gear-table` | `{gears: [4 × 500..4000]}` (writes cooler flash) |
 | POST | `/api/reconnect` | rescan and reconnect |
@@ -117,6 +134,23 @@ systemctl --user enable --now bs3-web.service
 Headless on purpose (no tray — that needs a graphical session with a tray
 host); Bluetooth may come up late, but the backend retries hardware every
 10s on its own. (Windows equivalent: the installer checkbox.)
+
+### Tray on Linux (AppIndicator)
+
+`bs3-web --tray` needs `.[tray]` plus a tray host. pystray prefers
+AppIndicator over X11 when the GIR is present — on Plasma 6/Wayland there
+is no XEmbed host, so AppIndicator is the only visible path:
+
+```bash
+# CachyOS/Arch (this machine): sudo pacman -S libayatana-appindicator
+# Ubuntu/Debian: sudo apt install gir1.2-ayatanaappindicator3-0.1
+# Fedora: sudo dnf install libayatana-appindicator-gtk3
+pip install -e .[tray]
+bs3-web --tray
+```
+
+Without the system package pystray falls back to X11 (runs, invisible
+here — verified: no `_NET_SYSTEM_TRAY_S0` owner on this desktop).
 
 ## Troubleshooting
 

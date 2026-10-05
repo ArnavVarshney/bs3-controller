@@ -12,7 +12,34 @@ import os
 
 def read_hwmon_temps() -> list[tuple[str, str, float]]:
     """Return [(chip, label, degC)]. Skips unreadable/virtual sensors."""
-    out = []
+    return [(e["chip"], e["label"], e["value"]) for e in _read_hwmon_entries()]
+
+
+def _hwmon_device_tag(hwmon: str) -> str | None:
+    """Stable per-device tag to disambiguate duplicate chips (two nvme
+    drives both report "Composite"). Prefers the device model string,
+    else the PCI/drive path tail, else None (caller falls back to index)."""
+    for cand in ("device/model", "device/product", "device/name"):
+        try:
+            with open(os.path.join(hwmon, cand)) as f:
+                v = f.read().strip()
+            if v:
+                return v.split()[0][:32]
+        except OSError:
+            pass
+    try:
+        target = os.path.basename(os.path.realpath(os.path.join(hwmon, "device")))
+        if target and target != "device":
+            return target[:32]
+    except OSError:
+        pass
+    return None
+
+
+def _read_hwmon_entries() -> list[dict]:
+    """Raw hwmon scan: [{hwmon, chip, label, input, value}]. Single reader
+    so read_hwmon_temps() and list_hwmon_sensors() never diverge."""
+    entries = []
     for hwmon in sorted(glob.glob("/sys/class/hwmon/hwmon*")):
         try:
             with open(os.path.join(hwmon, "name")) as f:
@@ -34,8 +61,61 @@ def read_hwmon_temps() -> list[tuple[str, str, float]]:
                 continue
             if millic <= 0 or millic > 150_000:
                 continue
-            out.append((chip, label, millic / 1000.0))
-    return out
+            entries.append({"hwmon": hwmon, "chip": chip, "label": label,
+                            "input": os.path.basename(inp),
+                            "value": millic / 1000.0})
+    return entries
+
+
+def _hwmon_sensor_id(chip: str, label: str, inp: str, tag: str | None,
+                     dup: int | bool = 0) -> str:
+    """Stable ID (no hwmonN — numbering shifts across boots).
+
+    dup=0: unique chip:label, bare ID. dup=-1/True: duplicate pair, tag
+    always attached (order-independent). dup>=0 int: positional fallback
+    when no device tag exists."""
+    leaf = label or inp  # unlabeled acpitz temp1 -> "temp1_input"
+    base = f"hwmon:{chip}:{leaf}"
+    if not dup:
+        return base
+    if tag:
+        return f"{base}:{tag}"
+    n = dup if isinstance(dup, int) and dup > 0 else 1
+    return f"{base}#{n + 1}"
+
+
+def _hwmon_die_hint(chip: str, label: str) -> str:
+    """Sort hint for the picker: gpu / cpu / other."""
+    if chip.split("_")[0] in _GPU_HWMON_CHIPS:
+        return "gpu"
+    if chip == "x86_pkg_temp" or label in (
+            "Tctl", "Tdie", "Package id 0", "TCPU", "TCPU_PCI"):
+        return "cpu"
+    return "other"
+
+
+def list_hwmon_sensors() -> list[dict]:
+    """All readable hwmon temps: [{id, chip, label, value, die}].
+    IDs stable across boots; duplicate chip:label pairs gain a device tag."""
+    return list_hwmon_sensors_from(_read_hwmon_entries())
+
+
+def _resolve_hwmon_id(sid: str, entries: list[dict]) -> float | None:
+    """Current value for a selected sensor ID (None when vanished)."""
+    counts: dict[str, int] = {}
+    for e in entries:
+        key = (e["chip"], e["label"] or e["input"])
+        counts[str(key)] = counts.get(str(key), 0) + 1
+    seen: dict[str, int] = {}
+    for e in entries:
+        key = (e["chip"], e["label"] or e["input"])
+        idx = seen.get(str(key), 0)
+        seen[str(key)] = idx + 1
+        tag = _hwmon_device_tag(e["hwmon"]) if counts[str(key)] > 1 else None
+        dup = 0 if counts[str(key)] <= 1 else (-1 if tag else idx)
+        if _hwmon_sensor_id(e["chip"], e["label"], e["input"], tag, dup) == sid:
+            return e["value"]
+    return None
 
 
 def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[dict]:
@@ -73,7 +153,7 @@ def _cim_query(namespace: str, classname: str, timeout: float = 10.0) -> list[di
 _CIM_TTL_S = 4.0  # powershell spawn is ~300ms; don't pay it every poll tick
 _HTTP_TTL_S = 2.0  # localhost HTTP is cheap; still avoid hammering it per tick
 _win_cache: dict = {"at": 0.0, "value": None, "gpu": None,
-                    "cpu_source": None, "gpu_source": None}
+                    "cpu_source": None, "gpu_source": None, "all": None}
 
 
 def _lhm_http_tree(port: int = 8085, timeout: float = 3.0) -> dict | None:
@@ -280,7 +360,35 @@ def _wmi_thermal_temp() -> float | None:
     return max(temps) if temps else None
 
 
-def _windows_die_temps() -> dict:
+def _lhm_sensor_id(hw: str, leaf: str) -> str:
+    """Stable Windows sensor ID (hardware + leaf names are stable)."""
+    return f"lhm:{hw}:{leaf}"
+
+
+def _windows_all_sensors(tree: dict | None,
+                         wmi_rows: list[tuple[str, str, float]]) -> list[dict]:
+    """Full LHM leaf list for the picker (web wins on ID collision)."""
+    out: dict[str, dict] = {}
+    if tree is not None:
+        for hw, leaf, v in _walk_temp_leaves(tree):
+            sid = _lhm_sensor_id(hw, leaf)
+            out[sid] = {"id": sid, "chip": hw, "label": leaf,
+                        "value": v,
+                        "die": "gpu" if _is_gpu_hw(hw) else "cpu"}
+    for parent, name, v in wmi_rows:
+        sid = _lhm_sensor_id(parent, name)
+        if sid not in out:
+            out[sid] = {"id": sid, "chip": parent, "label": name,
+                        "value": v,
+                        "die": "gpu" if _is_gpu_hw(parent) else "cpu"}
+    items = list(out.values())
+    order = {"cpu": 0, "gpu": 1}
+    items.sort(key=lambda s: (order.get(s["die"], 1), s["chip"], s["label"]))
+    return items
+
+
+def _windows_die_temps(cpu_id: str | None = None,
+                       gpu_id: str | None = None) -> dict:
     """Best-effort Windows CPU+GPU temps, cached (spawning helpers every 0.5s
     poll tick would strobe consoles and hammer localhost).
 
@@ -289,11 +397,15 @@ def _windows_die_temps() -> dict:
     (CPU only). Keys: cpu/gpu values (None when absent) plus per-die
     source labels for the dashboard. The WMI/thermal fallbacks only run
     past their TTL so a dead LHM doesn't cost a powershell spawn per tick.
+
+    cpu_id/gpu_id pin a die to one LHM leaf (picker selection); unknown or
+    vanished IDs fall back to the heuristic with a "(selected sensor
+    missing)" note so a stopped LHM never wedges the curve at a stale temp.
     """
     import time
 
     now = time.monotonic()
-    if now - _win_cache["at"] < _HTTP_TTL_S:
+    if now - _win_cache["at"] < _HTTP_TTL_S and not cpu_id and not gpu_id:
         return {"cpu": _win_cache["value"], "gpu": _win_cache["gpu"],
                 "cpu_source": _win_cache["cpu_source"],
                 "gpu_source": _win_cache["gpu_source"]}
@@ -303,6 +415,11 @@ def _windows_die_temps() -> dict:
     except ValueError:
         port = 8085
     tree = _lhm_http_tree(port)
+    wmi_rows: list[tuple[str, str, float]] = []
+    if (cpu is None or gpu is None) and now - _win_cache["at"] >= _CIM_TTL_S:
+        wmi_rows = _lhm_wmi_rows()
+    all_sensors = _windows_all_sensors(tree, wmi_rows)
+    by_id = {s["id"]: s for s in all_sensors}
     if tree is not None:
         v, name = _find_cpu_temp_ex(tree)
         if v is not None:
@@ -310,7 +427,7 @@ def _windows_die_temps() -> dict:
         v, name = _find_gpu_temp(tree)
         if v is not None:
             gpu, gpu_src = v, f"LHM web · {name}"
-    if (cpu is None or gpu is None) and now - _win_cache["at"] >= _CIM_TTL_S:
+    if (cpu is None or gpu is None) and wmi_rows:
         if cpu is None:
             v = _librehardwaremonitor_temp()
             if v is not None:
@@ -323,8 +440,23 @@ def _windows_die_temps() -> dict:
             v = _wmi_thermal_temp()
             if v is not None:
                 cpu, cpu_src = v, "thermal zone"
+    if cpu_id:
+        hit = by_id.get(cpu_id)
+        if hit is not None:
+            cpu, cpu_src = hit["value"], f"selected {hit['chip']} · {hit['label']}"
+        elif cpu is not None:
+            cpu_src = f"{cpu_src} (selected sensor missing)"
+    if gpu_id:
+        hit = by_id.get(gpu_id)
+        if hit is not None:
+            gpu, gpu_src = hit["value"], f"selected {hit['chip']} · {hit['label']}"
+        elif gpu_src is not None:
+            gpu_src = f"{gpu_src} (selected sensor missing)"
+        elif cpu_id and gpu_id and cpu is not None:
+            pass  # GPU stays None; drive logic reports it honestly
     _win_cache.update(at=now, value=cpu, gpu=gpu,
-                      cpu_source=cpu_src, gpu_source=gpu_src)
+                      cpu_source=cpu_src, gpu_source=gpu_src,
+                      all=all_sensors)
     return {"cpu": cpu, "gpu": gpu,
             "cpu_source": cpu_src, "gpu_source": gpu_src}
 
@@ -337,10 +469,18 @@ def _windows_temp() -> float | None:
 _GPU_HWMON_CHIPS = ("amdgpu", "radeon", "nouveau", "nvidia", "xe")
 
 
-def _hwmon_die_temps(temps: list[tuple[str, str, float]]) -> dict:
+def _hwmon_die_temps(temps: list[tuple[str, str, float]],
+                       cpu_id: str | None = None,
+                       gpu_id: str | None = None,
+                       _entries: list[dict] | None = None) -> dict:
     """Split one hwmon reading into CPU/GPU dies. GPU = hottest reading
     off a discrete-GPU chip; an APU's amdgpu node mirrors the package,
-    which is harmless (max() semantics downstream)."""
+    which is harmless (max() semantics downstream.
+
+    cpu_id/gpu_id pin a die to one hwmon sensor (picker selection: IDs from
+    list_hwmon_sensors); unknown IDs fall back to the heuristic with a
+    "(selected sensor missing)" note. _entries avoids a second sysfs scan
+    when die_temps() already holds them."""
     cpu = cpu_src = None
     for chip, label, t in temps:
         if chip == "x86_pkg_temp":
@@ -359,23 +499,87 @@ def _hwmon_die_temps(temps: list[tuple[str, str, float]]) -> dict:
     if g:
         chip, label, t = max(g, key=lambda e: e[2])
         gpu, gpu_src = t, f"hwmon {chip} {label}".rstrip()
+    if cpu_id or gpu_id:
+        entries = _entries if _entries is not None else _read_hwmon_entries()
+        by_id = {s["id"]: s for s in list_hwmon_sensors_from(entries)}
+        if cpu_id:
+            hit = by_id.get(cpu_id)
+            if hit is not None:
+                cpu, cpu_src = hit["value"], f"selected {hit['chip']} {hit['label']}".rstrip()
+            elif cpu is not None:
+                cpu_src = f"{cpu_src} (selected sensor missing)"
+        if gpu_id:
+            hit = by_id.get(gpu_id)
+            if hit is not None:
+                gpu, gpu_src = hit["value"], f"selected {hit['chip']} {hit['label']}".rstrip()
+            elif gpu_src is not None:
+                gpu_src = f"{gpu_src} (selected sensor missing)"
     return {"cpu": cpu, "gpu": gpu,
             "cpu_source": cpu_src if cpu is not None else None,
             "gpu_source": gpu_src}
 
 
-def die_temps() -> dict:
+def list_hwmon_sensors_from(entries: list[dict]) -> list[dict]:
+    """list_hwmon_sensors() over pre-read entries (one sysfs scan per tick)."""
+    counts: dict[str, int] = {}
+    for e in entries:
+        key = (e["chip"], e["label"] or e["input"])
+        counts[str(key)] = counts.get(str(key), 0) + 1
+    seen: dict[str, int] = {}
+    out = []
+    for e in entries:
+        key = (e["chip"], e["label"] or e["input"])
+        idx = seen.get(str(key), 0)
+        seen[str(key)] = idx + 1
+        # Duplicates always carry a tag: hwmon numbering shifts across
+        # boots, so bare-vs-tagged by scan order would swap identities.
+        tag = _hwmon_device_tag(e["hwmon"]) if counts[str(key)] > 1 else None
+        dup = 0 if counts[str(key)] <= 1 else -1  # -1 = always tag
+        if counts[str(key)] > 1 and not tag:
+            dup = idx  # last resort: positional
+        sid = _hwmon_sensor_id(e["chip"], e["label"], e["input"], tag, dup)
+        out.append({"id": sid, "chip": e["chip"],
+                    "label": e["label"] or e["input"],
+                    "value": e["value"],
+                    "die": _hwmon_die_hint(e["chip"], e["label"])})
+    order = {"cpu": 0, "gpu": 1, "other": 2}
+    out.sort(key=lambda s: (order.get(s["die"], 2), s["chip"], s["label"]))
+    return out
+
+
+def list_sensors() -> list[dict]:
+    """All selectable temp sensors for the picker (Linux hwmon, Windows LHM).
+
+    Never raises: absent backends yield []. Values are live at call time
+    (Linux: one sysfs scan; Windows: TTL-cached scan)."""
+    if os.name == "nt":
+        import time
+        if (_win_cache.get("all") is not None
+                and time.monotonic() - _win_cache["at"] < _HTTP_TTL_S):
+            return list(_win_cache["all"])
+        d = _windows_die_temps()  # refreshes _win_cache["all"] as a side effect
+        return list(_win_cache.get("all") or [])
+    try:
+        return list_hwmon_sensors()
+    except OSError:
+        return []
+
+
+def die_temps(cpu_id: str | None = None,
+              gpu_id: str | None = None) -> dict:
     """CPU+GPU temps: {"cpu", "gpu", "cpu_source", "gpu_source"}.
 
     Values are None when their die has no source (no dGPU, no LHM).
     Never raises for absent sensors — the caller treats None as "no
     reading". Linux reads hwmon once per call (cheap sysfs); Windows
     results are TTL-cached inside.
+
+    cpu_id/gpu_id pin a die to one sensor (picker selection, None = Auto).
     """
     if os.name == "nt":
-        return _windows_die_temps()
-    temps = read_hwmon_temps()
-    if not temps:
+        return _windows_die_temps(cpu_id, gpu_id)
+    entries = _read_hwmon_entries()
+    if not entries:
         # thermal zones fallback (containers / odd kernels): unlabeled,
         # so they can only feed the CPU side.
         zones = []
@@ -390,17 +594,19 @@ def die_temps() -> dict:
                     "cpu_source": "thermal zone", "gpu_source": None}
         return {"cpu": None, "gpu": None,
                 "cpu_source": None, "gpu_source": None}
-    return _hwmon_die_temps(temps)
+    temps = [(e["chip"], e["label"], e["value"]) for e in entries]
+    return _hwmon_die_temps(temps, cpu_id, gpu_id, entries)
 
 
-def curve_temp(source: str = "max") -> float:
+def curve_temp(source: str = "max", cpu_id: str | None = None,
+               gpu_id: str | None = None) -> float:
     """Curve drive temperature: one die, or the hotter of both.
 
     One fan, two heat sources — the hotter die sets the pace (same policy
     as the backend DeviceManager). Raises RuntimeError when the selected
     source has no reading.
     """
-    d = die_temps()
+    d = die_temps(cpu_id, gpu_id)
     if source == "cpu":
         t = d["cpu"]
     elif source == "gpu":

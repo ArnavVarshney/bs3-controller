@@ -156,20 +156,62 @@ def test_hwmon_die_split(monkeypatch):
     assert d["cpu_source"] == "hwmon k10temp Tctl"
 
 
+def test_hwmon_sensor_ids_unique_and_stable(monkeypatch):
+    entries = [
+        {"hwmon": "/sys/class/hwmon/hwmon1", "chip": "k10temp", "label": "Tctl",
+         "input": "temp1_input", "value": 52.0},
+        {"hwmon": "/sys/class/hwmon/hwmon2", "chip": "amdgpu", "label": "edge",
+         "input": "temp1_input", "value": 48.0},
+        {"hwmon": "/sys/class/hwmon/hwmon3", "chip": "nvme", "label": "Composite",
+         "input": "temp1_input", "value": 31.0},
+        {"hwmon": "/sys/class/hwmon/hwmon4", "chip": "nvme", "label": "Composite",
+         "input": "temp1_input", "value": 30.0},
+    ]
+    tags = {"/sys/class/hwmon/hwmon3": "KBG6AZNV512G",
+            "/sys/class/hwmon/hwmon4": "HFM001TD3JX013N"}
+    monkeypatch.setattr(S, "_read_hwmon_entries", lambda: entries)
+    monkeypatch.setattr(S, "_hwmon_device_tag", lambda h: tags.get(h))
+    ss = S.list_hwmon_sensors()
+    ids = [s["id"] for s in ss]
+    assert len(set(ids)) == 4  # duplicates disambiguated by device tag
+    assert "hwmon:k10temp:Tctl" in ids and "hwmon:amdgpu:edge" in ids
+    # order-independent: swap scan order, same ID set
+    monkeypatch.setattr(S, "_read_hwmon_entries", lambda: entries[::-1])
+    assert {s["id"] for s in S.list_hwmon_sensors()} == set(ids)
+
+
+def test_hwmon_die_pin_and_missing_fallback(monkeypatch):
+    entries = [
+        {"hwmon": "/sys/class/hwmon/hwmon1", "chip": "k10temp", "label": "Tctl",
+         "input": "temp1_input", "value": 52.0},
+        {"hwmon": "/sys/class/hwmon/hwmon2", "chip": "acpitz", "label": "",
+         "input": "temp1_input", "value": 70.0},
+    ]
+    monkeypatch.setattr(S, "_read_hwmon_entries", lambda: entries)
+    monkeypatch.setattr(S, "_hwmon_device_tag", lambda h: None)
+    temps = [(e["chip"], e["label"], e["value"]) for e in entries]
+    # pin CPU to the hotter acpitz sensor instead of the Tctl heuristic
+    d = S._hwmon_die_temps(temps, "hwmon:acpitz:temp1_input", None, entries)
+    assert d["cpu"] == 70.0 and d["cpu_source"].startswith("selected")
+    # unknown ID: heuristic value survives, note explains the fallback
+    d = S._hwmon_die_temps(temps, "hwmon:nope:nope", None, entries)
+    assert d["cpu"] == 52.0 and "(selected sensor missing)" in d["cpu_source"]
+
+
 def test_curve_temp_policy(monkeypatch):
     import pytest
 
-    monkeypatch.setattr(S, "die_temps", lambda: {
+    monkeypatch.setattr(S, "die_temps", lambda *a, **k: {
         "cpu": 55.0, "gpu": 72.5, "cpu_source": "t", "gpu_source": "t"})
     assert S.curve_temp() == 72.5
     assert S.curve_temp("cpu") == 55.0
     assert S.curve_temp("gpu") == 72.5
-    monkeypatch.setattr(S, "die_temps", lambda: {
+    monkeypatch.setattr(S, "die_temps", lambda *a, **k: {
         "cpu": 55.0, "gpu": None, "cpu_source": "t", "gpu_source": None})
     assert S.curve_temp() == 55.0
     with pytest.raises(RuntimeError, match="no GPU temperature source"):
         S.curve_temp("gpu")
-    monkeypatch.setattr(S, "die_temps", lambda: {
+    monkeypatch.setattr(S, "die_temps", lambda *a, **k: {
         "cpu": None, "gpu": None, "cpu_source": None, "gpu_source": None})
     monkeypatch.setattr(S, "cpu_temp", lambda: (_ for _ in ()).throw(
         RuntimeError("no temperature sensors found under /sys/class/hwmon")))

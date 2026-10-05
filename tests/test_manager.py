@@ -18,7 +18,7 @@ from bs3 import sensors
 @pytest.fixture
 def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(H, "find_coolers", lambda: [])
-    monkeypatch.setattr(sensors, "die_temps", lambda: {
+    monkeypatch.setattr(sensors, "die_temps", lambda *a, **k: {
         "cpu": 60.0, "gpu": None, "cpu_source": "test", "gpu_source": None})
     monkeypatch.setattr(D, "CONFIG_PATH", str(tmp_path / "config.json"))
 
@@ -138,9 +138,33 @@ def test_hardware_appearing_connects(isolated, monkeypatch):
         mgr.stop()
 
 
+def test_sensor_pins_persist_and_snapshot(isolated, monkeypatch):
+    monkeypatch.setattr(sensors, "list_sensors", lambda: [
+        {"id": "hwmon:k10temp:Tctl", "chip": "k10temp", "label": "Tctl",
+         "value": 60.0, "die": "cpu"}])
+    mgr = D.DeviceManager()
+    try:
+        out = mgr.set_sensors("hwmon:k10temp:Tctl", None)
+        assert out == {"cpu_sensor": "hwmon:k10temp:Tctl", "gpu_sensor": None}
+        s = mgr.snapshot()
+        assert s["cpu_sensor"] == "hwmon:k10temp:Tctl"
+        assert s["sensors"][0]["id"] == "hwmon:k10temp:Tctl"
+        with pytest.raises(ValueError):
+            mgr.set_sensors(123, None)
+    finally:
+        mgr.stop()
+    # reload keeps pins (config persistence)
+    mgr2 = D.DeviceManager()
+    try:
+        assert mgr2.cpu_sensor == "hwmon:k10temp:Tctl"
+        assert mgr2.snapshot()["cpu_sensor"] == "hwmon:k10temp:Tctl"
+    finally:
+        mgr2.stop()
+
+
 def test_drive_temp_max_of_both_dies(isolated, monkeypatch):
     """One fan, two heat sources: the hotter die sets the pace."""
-    monkeypatch.setattr(sensors, "die_temps", lambda: {
+    monkeypatch.setattr(sensors, "die_temps", lambda *a, **k: {
         "cpu": 55.0, "gpu": 72.5, "cpu_source": "test", "gpu_source": "test"})
     mgr = D.DeviceManager()
     try:

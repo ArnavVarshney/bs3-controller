@@ -11,6 +11,7 @@ Examples:
   bs3ctl rgb off | on
   bs3ctl effect 3            # preset; needs realtime (rpm ...) active
   bs3ctl standby delayed
+  bs3ctl sensors             # selectable temp sensors (IDs for monitor pins)
   bs3ctl monitor             # CPU-temp fan curve until Ctrl-C
 """
 
@@ -348,6 +349,19 @@ def cmd_standby(a) -> int:
     return 0
 
 
+def cmd_sensors(a) -> int:
+    items = sensors.list_sensors()
+    if not items:
+        print("no temperature sensors found"
+              + (" (run LibreHardwareMonitor as admin?)" if sys.platform == "win32" else " under /sys/class/hwmon"))
+        return 1
+    d = sensors.die_temps()
+    print(f"# auto: cpu={d['cpu']} ({d['cpu_source']}) gpu={d['gpu']} ({d['gpu_source']})")
+    for s in items:
+        print(f"{s['id']}  {s['value']:.1f}C  [{s['die']}]  {s['chip']} {s['label']}")
+    return 0
+
+
 def cmd_monitor(a) -> int:
     """CPU-temp curve loop. Re-applies after reconnect (realtime never survives one)."""
     from . import singleton
@@ -357,12 +371,13 @@ def cmd_monitor(a) -> int:
     if a.transport == "ble":
         return asyncio.run(_ble_monitor(a))
     cv = C.Curve()
-    print(f"# temp -> rpm curve active (source: {a.temp_source}; Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
+    pin = f", pins cpu={a.cpu_sensor or 'Auto'} gpu={a.gpu_sensor or 'Auto'}" if (a.cpu_sensor or a.gpu_sensor) else ""
+    print(f"# temp -> rpm curve active (source: {a.temp_source}{pin}; Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
     dev = None
     try:
         while True:
             try:
-                t = sensors.curve_temp(a.temp_source)
+                t = sensors.curve_temp(a.temp_source, a.cpu_sensor, a.gpu_sensor)
             except RuntimeError as e:
                 print(f"sensor error: {e}", file=sys.stderr)
                 time.sleep(5)
@@ -415,12 +430,13 @@ async def _ble_monitor(a) -> int:
     """BLE variant of cmd_monitor: holds one GATT link, CPU-temp curve."""
     from . import bleak_backend as B
     cv = C.Curve()
-    print(f"# temp -> rpm curve active (source: {a.temp_source}; Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
+    pin = f", pins cpu={a.cpu_sensor or 'Auto'} gpu={a.gpu_sensor or 'Auto'}" if (a.cpu_sensor or a.gpu_sensor) else ""
+    print(f"# temp -> rpm curve active (source: {a.temp_source}{pin}; Ctrl-C stops; cooler keeps last target). 90C panic -> max.", file=sys.stderr)
     ctl: B.BleakCooler | None = None
     try:
         while True:
             try:
-                t = sensors.curve_temp(a.temp_source)
+                t = sensors.curve_temp(a.temp_source, a.cpu_sensor, a.gpu_sensor)
             except RuntimeError as e:
                 print(f"sensor error: {e}", file=sys.stderr)
                 await asyncio.sleep(5)
@@ -503,6 +519,11 @@ def build_parser() -> argparse.ArgumentParser:
     m.add_argument("--interval", type=float, default=4.0)
     m.add_argument("--temp-source", choices=("max", "cpu", "gpu"), default="max",
                    help="which die drives the curve (default: hotter of both)")
+    m.add_argument("--cpu-sensor", default=None,
+                   help="pin CPU die to one sensor ID (see `bs3ctl sensors`; default: Auto)")
+    m.add_argument("--gpu-sensor", default=None,
+                   help="pin GPU die to one sensor ID (see `bs3ctl sensors`; default: Auto)")
+    sub.add_parser("sensors", help="list selectable temperature sensors")
     return p
 
 
@@ -533,6 +554,8 @@ def _dispatch(a) -> int:
         return cmd_rgb_upload(a)
     if a.cmd == "standby":
         return cmd_standby(a)
+    if a.cmd == "sensors":
+        return cmd_sensors(a)
     if a.cmd == "monitor":
         return cmd_monitor(a)
     raise AssertionError(a.cmd)

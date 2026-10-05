@@ -44,7 +44,7 @@ def test_all_routes_no_hardware():
     tmp = tempfile.NamedTemporaryFile(delete=False)
     tmp.close()
     H.find_coolers = lambda: []
-    sensors.die_temps = lambda: {"cpu": 55.0, "gpu": 61.0,
+    sensors.die_temps = lambda *a, **k: {"cpu": 55.0, "gpu": 61.0,
                                  "cpu_source": "test", "gpu_source": "test"}
     D.CONFIG_PATH = tmp.name
     mgr = D.DeviceManager()
@@ -106,6 +106,14 @@ def test_all_routes_no_hardware():
         assert resp["temp_source"] == "gpu"
         code, _ = _post(base, "/api/reconnect", {})
         assert code == 200
+        # sensor pins are link-independent: select, reflect, validate
+        code, resp = _post(base, "/api/sensors", {"cpu_sensor": "hwmon:k10temp:Tctl", "gpu_sensor": None})
+        assert code == 200
+        assert resp["cpu_sensor"] == "hwmon:k10temp:Tctl"
+        code, body = _get(base, "/api/status")
+        s = json.loads(body)
+        assert s["cpu_sensor"] == "hwmon:k10temp:Tctl"
+        assert isinstance(s["sensors"], list)
         # support bundle: missing log file -> honest 404 ...
         W._log_path = lambda: None
         code, resp = _post(base, "/api/logs", {})
@@ -135,6 +143,8 @@ def test_all_routes_no_hardware():
             ("/api/curve", {"points": [[35, 1000]], "enabled": True}),
             ("/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": "yes"}),
             ("/api/curve", {"points": [[35, 1000], [55, 2000]], "enabled": True, "source": "lava"}),
+            ("/api/sensors", {"cpu_sensor": 123}),
+            ("/api/sensors", {"gpu_sensor": False}),
             ("/api/gear-table", {"gears": [1, 2, 3]}),
             ("/api/gear-table", {"gears": None}),
             ("/api/nope", {}),
