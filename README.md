@@ -101,6 +101,23 @@ bs3-web --tray                # Windows tray icon: live tooltip, dashboard/recon
 Bad input → 400, unknown routes → 404, device timeouts → 500.
 Settings persist to `~/.config/bs3-controller/config.json`.
 
+### Run on boot (Linux)
+
+A systemd user service — no root needed:
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp systemd/bs3-web.service ~/.config/systemd/user/
+# edit ExecStart if your checkout/venv lives elsewhere
+systemctl --user daemon-reload
+systemctl --user enable --now bs3-web.service
+```
+
+`loginctl enable-linger $USER` makes it start at boot instead of at login.
+Headless on purpose (no tray — that needs a graphical session with a tray
+host); Bluetooth may come up late, but the backend retries hardware every
+10s on its own. (Windows equivalent: the installer checkbox.)
+
 ## Troubleshooting
 
 - `Permission denied: '/dev/hidrawN'` — install the udev rule (above),

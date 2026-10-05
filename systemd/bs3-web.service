@@ -1,0 +1,33 @@
+# bs3-web backend as a user service: local dashboard + fan-curve automation.
+#
+# Install (no root needed):
+#   mkdir -p ~/.config/systemd/user
+#   cp systemd/bs3-web.service ~/.config/systemd/user/
+#   # edit ExecStart if your checkout/venv lives elsewhere
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now bs3-web.service
+#
+# True boot start (before first login): loginctl enable-linger $USER
+# Otherwise the service starts at login and stops at logout.
+#
+# Notes:
+# - Bluetooth may come up after this unit; the backend retries hardware
+#   every 10s on its own, so ordering with bluetooth.target is best-effort.
+# - Headless on purpose: no --tray here (needs a graphical session with a
+#   tray host). Open http://127.0.0.1:8765/ for the dashboard.
+# - One instance only: the backend refuses to start twice (singleton guard),
+#   so manual `bs3-web` runs while the service is up will exit with a hint.
+[Unit]
+Description=BS3 Controller backend (Flydigi BS3 dashboard + fan curves)
+After=bluetooth.target
+Wants=bluetooth.target
+
+[Service]
+Type=simple
+ExecStart=%h/Projects/bs3-controller/.venv/bin/bs3-web --transport hid --port 8765
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
