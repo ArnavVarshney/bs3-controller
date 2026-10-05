@@ -35,12 +35,23 @@ def build_icon(size: int = 64):
     return img
 
 
+def tray_text(s: str) -> str:
+    """Tooltip text safe for latin-1-only backends (X11 WM_NAME).
+
+    python-xlib encodes window titles as latin-1: the em dash / ellipsis
+    used elsewhere in status lines would crash Icon() construction.
+    ° and · survive; anything else degrades to ? rather than raising.
+    """
+    s = s.replace("—", "-").replace("–", "-").replace("…", "...")
+    return s.encode("latin-1", "replace").decode("latin-1")
+
+
 def run_tray(status_fn, on_open, on_reconnect, on_quit):
     """Block running the tray icon (call from the main thread).
 
     status_fn() -> short tooltip line ("1700 rpm · CPU 55.2°" or status
-    text when unconnected); polled every couple of seconds. The callbacks
-    run on the poll thread — keep them quick and exception-safe.
+    text when unconnected); polled every couple of seconds. Menu callbacks
+    run on pystray's event thread — keep them quick and exception-safe.
     """
     import threading
 
@@ -51,7 +62,7 @@ def run_tray(status_fn, on_open, on_reconnect, on_quit):
 
     def tooltip():
         try:
-            return "BS3 Controller — " + (status_fn() or "starting…")
+            return "BS3 Controller - " + tray_text(status_fn() or "starting...")
         except Exception:
             return "BS3 Controller"
 

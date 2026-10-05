@@ -297,7 +297,7 @@ def main(argv=None) -> int:
     ap.add_argument("--lhm", nargs="?", const="auto", default=None, metavar="PATH",
                     help="ensure LibreHardwareMonitor runs (Windows CPU temps), started minimized; optional exe path (default: alongside the backend)")
     ap.add_argument("--tray", action="store_true",
-                    help="Windows tray icon (needs .[tray]): live tooltip, dashboard/reconnect/quit menu")
+                    help="tray icon (needs .[tray]): live tooltip, dashboard/reconnect/quit menu")
     a = ap.parse_args(argv)
     from . import singleton
     if not singleton.acquire("BS3Link"):
@@ -324,6 +324,14 @@ def main(argv=None) -> int:
                        mgr.reconnect, srv.shutdown)
         except KeyboardInterrupt:
             pass
+        except Exception as e:
+            # tray backend missing/broken (e.g. no X11): stay up serving
+            print(f"bs3-web: tray unavailable ({e}); serving without tray",
+                  file=sys.stderr)
+            try:
+                srv.serve_forever()
+            except KeyboardInterrupt:
+                pass
         finally:
             mgr.stop()
         return 0

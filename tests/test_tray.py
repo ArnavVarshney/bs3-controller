@@ -23,6 +23,13 @@ def test_icon_scales():
     assert T.build_icon(32).size == (32, 32)
 
 
+def test_tooltip_text_is_x11_safe():
+    assert T.tray_text("1700 rpm · CPU 55.2°") == "1700 rpm · CPU 55.2°"
+    assert T.tray_text("BS3 — starting…") == "BS3 - starting..."
+    nasty = T.tray_text("quiet → ➀")
+    nasty.encode("latin-1")  # must not raise anywhere down the line
+
+
 def _stub_pystray(registry):
     """Fake pystray: records MenuItems so tests can invoke callbacks the
     way pystray does — callback(icon, item)."""
