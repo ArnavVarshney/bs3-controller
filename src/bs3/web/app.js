@@ -76,6 +76,12 @@ function render(s) {
   fillSensorSel($("gpuSensor"), s.sensors || [], s.gpu_sensor);
   if (!st) {
     setText("model", "No cooler");
+    if (s.backend) {
+      setText("sysBackend", "v" + (s.backend.version || "?"));
+      setText("sysLink", s.backend.transport || "?");
+    }
+    setText("sysCpuSrc", (s.temp_sources && s.temp_sources.cpu) || "none");
+    setText("sysGpuSrc", (s.temp_sources && s.temp_sources.gpu) || "none");
     return;
   }
   setText("model", (s.model || "?") + " · fw " + (s.fw || "?"));

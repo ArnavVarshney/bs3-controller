@@ -84,9 +84,9 @@ bs3-web --tray                # tray icon: live tooltip, dashboard/reconnect/qui
 
 ### Sensors (selectable)
 
-Auto-pick no longer the only option. The Temp-curve card has CPU-sensor
-and GPU-sensor dropdowns (Auto + every live sensor); the drive switch
-(hotter/CPU/GPU) stays. Pins persist in `config.json` (`cpu_sensor`,
+Auto-pick no longer the only option. The System card has CPU-sensor
+and GPU-sensor dropdowns (Auto + every live sensor); the Temp-curve
+card keeps the drive switch (hotter/CPU/GPU). Pins persist in `config.json` (`cpu_sensor`,
 `gpu_sensor`); a vanished sensor falls back to Auto with a
 "(selected sensor missing)" note instead of wedging the curve.
 `GET /api/status` carries the live `sensors` list; `POST /api/sensors`

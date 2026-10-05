@@ -54,8 +54,6 @@
     <svg id="curve" viewBox="0 0 400 220" width="100%" height="220"></svg>
     <div class="row"><button id="btnCurveSave">Save curve + enable</button><button id="btnCurveReset" class="ghost">Reset</button>
       <select id="tempSrc" title="Which temperature drives the curve"><option value="max">hotter of CPU/GPU</option><option value="cpu">CPU only</option><option value="gpu">GPU only</option></select></div>
-    <div class="row"><label class="lbl">CPU sensor <select id="cpuSensor" title="Which sensor feeds the CPU slot"></select></label>
-      <label class="lbl">GPU sensor <select id="gpuSensor" title="Which sensor feeds the GPU slot"></select></label></div>
     <p class="muted" id="curveCapWarn" hidden></p>
     <p class="muted">Drag points · double-click adds · right-click removes (2–8 pts).</p>
   </section>
@@ -88,8 +86,10 @@
     <div class="statCol">
       <div><label>Backend</label><b id="sysBackend">–</b></div>
       <div><label>Link</label><b id="sysLink">–</b></div>
-      <div><label>CPU sensor</label><b id="sysCpuSrc">–</b></div>
-      <div><label>GPU sensor</label><b id="sysGpuSrc">–</b></div>
+      <div><label>CPU sensor</label><select id="cpuSensor" title="Which sensor feeds the CPU slot"></select></div>
+      <div><label>→ resolved</label><b id="sysCpuSrc">–</b></div>
+      <div><label>GPU sensor</label><select id="gpuSensor" title="Which sensor feeds the GPU slot"></select></div>
+      <div><label>→ resolved</label><b id="sysGpuSrc">–</b></div>
     </div>
     <div class="row"><button id="btnLogs" class="ghost">Download logs</button></div>
   </section>
